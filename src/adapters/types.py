@@ -16,6 +16,7 @@ class UsageEntry:
     cost_usd: float | None
     project: str
     agent_id: str
+    message_count: int = 1
 
     @property
     def total_tokens(self) -> int:

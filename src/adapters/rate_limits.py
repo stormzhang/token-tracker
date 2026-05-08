@@ -25,12 +25,12 @@ def load_rate_limits() -> RateLimits | None:
     five_pct = five.get("used_percentage")
     five_reset = five.get("resets_at")
     if five_reset and five_reset < now_ts:
-        five_pct = None
+        five_pct = 0.0
 
     seven_pct = seven.get("used_percentage")
     seven_reset = seven.get("resets_at")
     if seven_reset and seven_reset < now_ts:
-        seven_pct = None
+        seven_pct = 0.0
 
     model_info = data.get("model") or {}
     model_name = model_info.get("display_name") or model_info.get("id") or ""

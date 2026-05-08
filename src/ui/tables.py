@@ -126,6 +126,20 @@ def _append_trend(lines: Text, current: float, previous: float) -> None:
     lines.append(f"{arrow}", style=style)
 
 
+def render_tab_bar(agent_names: list[str], current: int) -> None:
+    line = Text()
+    line.append("  ")
+    for i, name in enumerate(agent_names):
+        if i > 0:
+            line.append(" │ ", style=_S.dim)
+        if i == current:
+            line.append(f" {name} ", style="bold reverse")
+        else:
+            line.append(f" {name} ", style=_S.dim)
+    line.append("          ← → 切换  q 退出", style=_S.dim)
+    console.print(line)
+
+
 def _project_short(project: str) -> str:
     return project if project else "unknown"
 
@@ -151,7 +165,7 @@ def _render_header(agents: list[str], total_tokens: int, total_cost: float,
     lines.append(f"  消息: ", style=_S.dim)
     lines.append(f"{total_messages}", style="bold")
     lines.append(f"  天数: ", style=_S.dim)
-    lines.append(f"{days}天", style=_S.accent)
+    lines.append(f"{days}", style=_S.accent)
     console.print(lines)
 
 
@@ -163,6 +177,7 @@ def render_dashboard(
     blocks: list[SessionBlock],
     rate_limits: RateLimits | None = None,
     p90: P90Limits | None = None,
+    agents: list[str] | None = None,
 ) -> None:
     if not daily_stats:
         console.print(f"[{_S.warn}]暂无数据[/{_S.warn}]")
@@ -173,7 +188,7 @@ def render_dashboard(
     total_msgs = sum(s.message_count for s in daily_stats)
     total_sessions = sum(s.session_count for s in daily_stats)
 
-    _render_header(["Claude Code"], total_tokens, total_cost, total_sessions, total_msgs, len(daily_stats))
+    _render_header(agents or ["Claude Code"], total_tokens, total_cost, total_sessions, total_msgs, len(daily_stats))
 
     # --- 本月概览 ---
     if monthly_stats:
@@ -184,7 +199,8 @@ def render_dashboard(
     cur_week = weekly_stats[-1] if weekly_stats else None
     last_week = weekly_stats[-2] if len(weekly_stats) >= 2 else None
 
-    if p90 and (not rate_limits or rate_limits.five_hour_pct is None):
+    has_limits = rate_limits and (rate_limits.five_hour_pct is not None or rate_limits.seven_day_pct is not None)
+    if p90 and not has_limits:
         today = daily_stats[-1] if daily_stats else None
         yesterday = daily_stats[-2] if len(daily_stats) >= 2 else None
         if today:
@@ -196,6 +212,8 @@ def render_dashboard(
         if active_blocks:
             for b in active_blocks:
                 _render_active_block(b, rate_limits, cur_week, last_block, last_week)
+        elif rate_limits:
+            _render_idle_panel(rate_limits, cur_week, last_week)
 
     # --- 最近十条会话 ---
     if sessions:
@@ -762,4 +780,53 @@ def _render_active_block(
     else:
         panel_style = _S.bar_low
 
+    console.print(Panel(lines, border_style=panel_style, padding=(0, 1)))
+
+
+def _render_idle_panel(
+    rate_limits: RateLimits,
+    week: WeeklyStats | None = None,
+    last_week: WeeklyStats | None = None,
+) -> None:
+    now = datetime.now(timezone.utc)
+    bar_width = 20 if _width_mode() == "compact" else 30
+    lines = Text()
+    lines.append("限额数据面板\n\n", style="bold")
+
+    if rate_limits.five_hour_pct is not None:
+        reset_suffix = ""
+        if rate_limits.five_hour_resets_at:
+            reset_dt = datetime.fromtimestamp(rate_limits.five_hour_resets_at, tz=timezone.utc)
+            reset_suffix = f"  重置于 {reset_dt.strftime('%H:%M')}"
+        _append_bar(lines, f"  5h 限额    ", rate_limits.five_hour_pct, bar_width, reset_suffix)
+
+    if rate_limits.seven_day_pct is not None:
+        reset_suffix = ""
+        if rate_limits.seven_day_resets_at:
+            reset_dt = datetime.fromtimestamp(rate_limits.seven_day_resets_at, tz=timezone.utc)
+            reset_suffix = f"  重置于 {reset_dt.strftime('%m-%d %H:%M')}"
+        if rate_limits.five_hour_pct is not None:
+            lines.append("\n")
+        _append_bar(lines, f"  7d 限额    ", rate_limits.seven_day_pct, bar_width, reset_suffix)
+
+        if week:
+            elapsed_days = now.weekday() + 1
+            daily_avg_cost = week.cost_usd / elapsed_days if elapsed_days > 0 else 0
+            lines.append(f"  Token     {_fmt_tokens(week.total_tokens)}", style=_S.token)
+            if last_week:
+                _append_trend(lines, week.total_tokens, last_week.total_tokens)
+            lines.append(f"  Output: {_fmt_tokens(week.output_tokens)}", style=_S.dim)
+            lines.append(f"  速率: {_fmt_tokens(week.total_tokens // elapsed_days)}/天\n", style=_S.dim)
+            lines.append(f"  等效成本  {_fmt_cost(week.cost_usd)}", style=_S.cost)
+            lines.append(f"  日均: {_fmt_cost(daily_avg_cost)}", style=_S.dim)
+            lines.append("\n")
+            lines.append(f"  消息      {week.message_count} 条  会话: {week.session_count}", style=_S.dim)
+
+    if rate_limits.model:
+        lines.append(f"\n  模型: {rate_limits.model}", style=_S.dim)
+
+    lines.append("\n")
+
+    max_pct = max(rate_limits.five_hour_pct or 0, rate_limits.seven_day_pct or 0)
+    panel_style = _S.bar_high if max_pct > 80 else _S.bar_mid if max_pct > 50 else _S.bar_low
     console.print(Panel(lines, border_style=panel_style, padding=(0, 1)))

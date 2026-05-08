@@ -21,7 +21,7 @@ def aggregate_daily(entries: list[UsageEntry]) -> list[DailyStats]:
         s.cache_read_tokens += e.cache_read_tokens
         s.total_tokens += e.total_tokens
         s.cost_usd += cost
-        s.message_count += 1
+        s.message_count += e.message_count
         s.models[e.model] = s.models.get(e.model, 0) + e.total_tokens
         sessions_by_date[date_str].add(e.session_id)
 
@@ -47,7 +47,7 @@ def aggregate_monthly(entries: list[UsageEntry]) -> list[MonthlyStats]:
         s.cache_read_tokens += e.cache_read_tokens
         s.total_tokens += e.total_tokens
         s.cost_usd += cost
-        s.message_count += 1
+        s.message_count += e.message_count
         s.models[e.model] = s.models.get(e.model, 0) + e.total_tokens
         sessions_by_month[month_str].add(e.session_id)
 
@@ -81,7 +81,7 @@ def aggregate_weekly(entries: list[UsageEntry]) -> list[WeeklyStats]:
         s.cache_read_tokens += e.cache_read_tokens
         s.total_tokens += e.total_tokens
         s.cost_usd += cost
-        s.message_count += 1
+        s.message_count += e.message_count
         s.models[e.model] = s.models.get(e.model, 0) + e.total_tokens
         sessions_by_week[week_key].add(e.session_id)
 
@@ -125,7 +125,7 @@ def aggregate_sessions(entries: list[UsageEntry]) -> list[SessionStats]:
             s.cache_read_tokens += e.cache_read_tokens
             s.total_tokens += e.total_tokens
             s.cost_usd += cost
-            s.message_count += 1
+            s.message_count += e.message_count
 
         sessions.append(s)
 

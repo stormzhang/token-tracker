@@ -1,15 +1,137 @@
 import sys
 
-from .adapters import claude
-from .adapters.rate_limits import load_rate_limits
+from .adapters import claude, codex
+from .adapters.rate_limits import load_rate_limits as load_claude_rate_limits
 from .adapters.registry import detect_agents
 from .analyzer.aggregator import aggregate_daily, aggregate_monthly, aggregate_sessions, aggregate_weekly
 from .analyzer.blocks import analyze_blocks, calculate_p90
 from .hooks import is_setup, setup, unsetup
 from .ui.tables import (
     console, render_blocks, render_daily, render_dashboard,
-    render_monthly, render_sessions, render_weekly,
+    render_monthly, render_sessions, render_tab_bar, render_weekly,
 )
+
+AGENT_ALIASES = {"claude": "claude-code", "codex": "codex"}
+AGENT_LOADERS = {"claude-code": claude, "codex": codex}
+
+
+def _load_entries(agent_id: str, hours_back: int = 0):
+    loader = AGENT_LOADERS.get(agent_id)
+    return loader.load_entries(hours_back=hours_back) if loader else []
+
+
+def _load_all_entries(hours_back: int = 0):
+    entries = claude.load_entries(hours_back=hours_back) + codex.load_entries(hours_back=hours_back)
+    entries.sort(key=lambda e: e.timestamp)
+    return entries
+
+
+def _show_agent_dashboard(agent_id: str):
+    if agent_id == "claude-code" and not is_setup():
+        console.print("[dim]首次运行，自动配置 statusLine hook...[/dim]")
+        setup()
+        console.print()
+
+    agent_name = "Claude Code" if agent_id == "claude-code" else "Codex"
+    data = _build_agent_data(agent_id, agent_name)
+    if not data:
+        console.print(f"[yellow]暂无 token 使用数据[/yellow]")
+        return
+    render_dashboard(**data)
+
+
+def _build_agent_data(agent_id: str, agent_name: str) -> dict | None:
+    entries = _load_entries(agent_id)
+    if not entries:
+        return None
+    daily = aggregate_daily(entries)
+    weekly = aggregate_weekly(entries)
+    monthly = aggregate_monthly(entries)
+    sessions = aggregate_sessions(entries)
+    recent = _load_entries(agent_id, hours_back=48)
+    blocks = analyze_blocks(recent)
+    if agent_id == "claude-code":
+        rate_limits = load_claude_rate_limits()
+    elif agent_id == "codex":
+        rate_limits = codex.load_rate_limits()
+    else:
+        rate_limits = None
+    p90 = None
+    has_limits = rate_limits and (rate_limits.five_hour_pct is not None or rate_limits.seven_day_pct is not None)
+    if not has_limits:
+        p90 = calculate_p90(daily)
+    return dict(
+        daily_stats=daily, weekly_stats=weekly, monthly_stats=monthly,
+        sessions=sessions, blocks=blocks, rate_limits=rate_limits,
+        p90=p90, agents=[agent_name],
+    )
+
+
+def _show_interactive_dashboard(agents):
+    import tty
+    import termios
+    from io import StringIO
+    from rich.console import Console as RichConsole
+    import src.ui.tables as _tables
+
+    if any(a.id == "claude-code" for a in agents) and not is_setup():
+        console.print("[dim]首次运行，自动配置 statusLine hook...[/dim]")
+        setup()
+
+    agent_names = [a.name for a in agents]
+    console.print(f"[dim]加载数据...[/dim]")
+    cache = {a.id: _build_agent_data(a.id, a.name) for a in agents}
+
+    current = 0
+    orig = _tables.console
+
+    try:
+        while True:
+            buf = StringIO()
+            _tables.console = RichConsole(
+                file=buf, width=orig.width, force_terminal=True,
+            )
+            render_tab_bar(agent_names, current)
+            data = cache[agents[current].id]
+            if data:
+                render_dashboard(**data)
+            else:
+                _tables.console.print(f"[yellow]暂无数据[/yellow]")
+            _tables.console = orig
+
+            sys.stdout.write("\033[H" + buf.getvalue() + "\033[J")
+            sys.stdout.flush()
+
+            key = _read_key(tty, termios)
+            if key == "left":
+                current = (current - 1) % len(agents)
+            elif key == "right":
+                current = (current + 1) % len(agents)
+            elif key == "quit":
+                break
+    finally:
+        _tables.console = orig
+
+
+def _read_key(tty, termios):
+    fd = sys.stdin.fileno()
+    old = termios.tcgetattr(fd)
+    try:
+        tty.setraw(fd)
+        ch = sys.stdin.read(1)
+        if ch == "\x1b":
+            ch2 = sys.stdin.read(1)
+            if ch2 == "[":
+                ch3 = sys.stdin.read(1)
+                if ch3 == "D":
+                    return "left"
+                if ch3 == "C":
+                    return "right"
+        if ch in ("q", "Q", "\x03"):
+            return "quit"
+        return "other"
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
 
 def main():
@@ -28,30 +150,39 @@ def main():
         console.print("[red]未检测到任何 AI Agent[/red]")
         sys.exit(1)
 
+    agent_ids = {a.id for a in agents}
     console.print(f"[dim]检测到: {', '.join(a.name + ' ✓' for a in agents)}[/dim]")
 
-    entries = claude.load_entries()
+    # tt claude / tt codex
+    if command in AGENT_ALIASES:
+        agent_id = AGENT_ALIASES[command]
+        if agent_id not in agent_ids:
+            console.print(f"[red]未检测到 {command}[/red]")
+            sys.exit(1)
+        _show_agent_dashboard(agent_id)
+        return
+
+    if command == "dashboard":
+        agent_filter = args[1] if len(args) > 1 and args[1] in AGENT_ALIASES else None
+        if agent_filter:
+            agent_id = AGENT_ALIASES[agent_filter]
+            if agent_id not in agent_ids:
+                console.print(f"[red]未检测到 {agent_filter}[/red]")
+                sys.exit(1)
+            _show_agent_dashboard(agent_id)
+        elif len(agents) > 1 and sys.stdin.isatty():
+            _show_interactive_dashboard(agents)
+        else:
+            _show_agent_dashboard(agents[0].id)
+        return
+
+    # 其他命令使用合并数据
+    entries = _load_all_entries()
     if not entries:
         console.print("[yellow]暂无 token 使用数据[/yellow]")
         sys.exit(0)
 
-    if command == "dashboard":
-        if not is_setup():
-            console.print("[dim]首次运行，自动配置 statusLine hook...[/dim]")
-            setup()
-            console.print()
-        daily = aggregate_daily(entries)
-        weekly = aggregate_weekly(entries)
-        monthly = aggregate_monthly(entries)
-        sessions = aggregate_sessions(entries)
-        recent = claude.load_entries(hours_back=48)
-        blocks = analyze_blocks(recent)
-        rate_limits = load_rate_limits()
-        p90 = None
-        if not rate_limits or rate_limits.five_hour_pct is None:
-            p90 = calculate_p90(daily)
-        render_dashboard(daily, weekly, monthly, sessions, blocks, rate_limits, p90)
-    elif command == "daily":
+    if command == "daily":
         stats = aggregate_daily(entries)
         render_daily(stats)
     elif command == "weekly":
@@ -76,12 +207,12 @@ def main():
                 hours = int(args[1])
             except ValueError:
                 pass
-        recent = claude.load_entries(hours_back=hours)
+        recent = _load_all_entries(hours_back=hours)
         blocks = analyze_blocks(recent)
         render_blocks(blocks)
     else:
         console.print(f"[red]未知命令: {command}[/red]")
-        console.print("[dim]可用命令: dashboard, daily, weekly, monthly, sessions, blocks, setup, unsetup[/dim]")
+        console.print("[dim]可用命令: dashboard, daily, weekly, monthly, sessions, blocks, claude, codex, setup, unsetup[/dim]")
         sys.exit(1)
 
 
