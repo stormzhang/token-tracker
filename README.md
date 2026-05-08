@@ -1,49 +1,51 @@
 # Token Tracker
 
-CLI dashboard to track token usage across local AI agents.
+本地 AI Agent Token 消耗追踪工具，CLI Dashboard 一目了然。
 
-Supports **Claude Code** and **Codex** — see how many tokens you burn, what it costs, and how close you are to rate limits.
+支持 **Claude Code** 和 **Codex** — 实时查看 token 用量、等效成本、限额状态。
 
 ![Python](https://img.shields.io/badge/python-3.12+-blue) ![License](https://img.shields.io/badge/license-MIT-green)
 
+[English](README_EN.md)
+
 ![Token Tracker Dashboard](screenshot.png)
 
-## Features
+## 功能
 
-- **Multi-agent tracking** — Claude Code + Codex in one place, interactive tab switching
-- **Rate limit monitoring** — real-time 5h / 7d quota usage with reset countdown
-- **Cost analysis** — per-session, daily, weekly, monthly cost breakdown (LiteLLM pricing)
-- **Session insights** — project, model, duration, message count per session
-- **5h billing block analysis** — burn rate, active/idle detection
-- **Zero config** — auto-detects installed agents, reads local data directly
+- **多 Agent 追踪** — Claude Code + Codex 统一面板，左右键切换
+- **限额监控** — 实时 5h / 7d 配额百分比 + 重置倒计时
+- **成本分析** — 按会话、日、周、月维度的等效成本统计
+- **会话洞察** — 项目、模型、时长、消息数一览
+- **5h 计费块分析** — burn rate、活跃/空闲检测
+- **零配置** — 自动检测已安装的 Agent，直接读取本地数据
 
-## Install
+## 安装
 
 ```bash
 pip install token-tracker
 ```
 
-## Usage
+## 使用
 
 ```bash
-tt                # interactive dashboard (arrow keys to switch agents)
-tt claude         # Claude Code only
-tt codex          # Codex only
+tt                # 交互式 Dashboard（方向键切换 Agent）
+tt claude         # 仅 Claude Code
+tt codex          # 仅 Codex
 ```
 
-## Data Sources
+## 数据源
 
-| Agent | Path | Format |
-|-------|------|--------|
-| Claude Code | `~/.claude/projects/*/` | JSONL (per-message usage) |
+| Agent | 路径 | 格式 |
+|-------|------|------|
+| Claude Code | `~/.claude/projects/*/` | JSONL（逐条消息 usage） |
 | Codex | `~/.codex/sessions/` | JSONL + SQLite |
 
-Token Tracker is **read-only** — it never modifies any agent data.
+Token Tracker 是**只读**的，不会修改任何 Agent 数据。
 
-## Requirements
+## 环境要求
 
 - Python 3.12+
-- [Rich](https://github.com/Textualize/rich) (auto-installed)
+- [Rich](https://github.com/Textualize/rich)（自动安装）
 
 ## License
 
