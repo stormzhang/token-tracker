@@ -4,7 +4,7 @@
 
 支持 **Claude Code** 和 **Codex** — 实时查看 token 用量、等效成本、限额状态。
 
-![Python](https://img.shields.io/badge/python-3.12+-blue) ![License](https://img.shields.io/badge/license-MIT-green)
+![Python](https://img.shields.io/badge/python-3.10+-blue) ![License](https://img.shields.io/badge/license-MIT-green)
 
 [English](README_EN.md)
 
@@ -50,7 +50,7 @@ Token Tracker 是**只读**的，不会修改任何 Agent 数据。
 
 ## 环境要求
 
-- Python 3.12+
+- Python 3.10+
 - [Rich](https://github.com/Textualize/rich)（自动安装）
 
 ## License

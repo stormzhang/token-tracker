@@ -4,7 +4,7 @@ CLI dashboard to track token usage across local AI agents.
 
 Supports **Claude Code** and **Codex** — see how many tokens you burn, what it costs, and how close you are to rate limits.
 
-![Python](https://img.shields.io/badge/python-3.12+-blue) ![License](https://img.shields.io/badge/license-MIT-green)
+![Python](https://img.shields.io/badge/python-3.10+-blue) ![License](https://img.shields.io/badge/license-MIT-green)
 
 [中文](README.md)
 
@@ -50,7 +50,7 @@ Token Tracker is **read-only** — it never modifies any agent data.
 
 ## Requirements
 
-- Python 3.12+
+- Python 3.10+
 - [Rich](https://github.com/Textualize/rich) (auto-installed)
 
 ## License
