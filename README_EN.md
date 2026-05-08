@@ -22,6 +22,12 @@ Supports **Claude Code** and **Codex** — see how many tokens you burn, what it
 ## Install
 
 ```bash
+curl -sSL https://raw.githubusercontent.com/stormzhang/token-tracker/master/install.sh | bash
+```
+
+Or via pip:
+
+```bash
 pip install token-tracker
 ```
 
