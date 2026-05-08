@@ -85,6 +85,8 @@ def _show_interactive_dashboard(agents):
     current = 0
     orig = _tables.console
 
+    sys.stdout.write("\033[?1049h\033[?25l")
+    sys.stdout.flush()
     try:
         while True:
             buf = StringIO()
@@ -99,7 +101,7 @@ def _show_interactive_dashboard(agents):
                 _tables.console.print(f"[yellow]暂无数据[/yellow]")
             _tables.console = orig
 
-            sys.stdout.write("\033[H" + buf.getvalue() + "\033[J")
+            sys.stdout.write("\033[2J\033[H" + buf.getvalue())
             sys.stdout.flush()
 
             key = _read_key(tty, termios)
@@ -110,6 +112,8 @@ def _show_interactive_dashboard(agents):
             elif key == "quit":
                 break
     finally:
+        sys.stdout.write("\033[?25h\033[?1049l")
+        sys.stdout.flush()
         _tables.console = orig
 
 
