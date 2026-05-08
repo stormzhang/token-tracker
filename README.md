@@ -4,7 +4,9 @@ CLI dashboard to track token usage across local AI agents.
 
 Supports **Claude Code** and **Codex** — see how many tokens you burn, what it costs, and how close you are to rate limits.
 
-![Token Tracker Dashboard](https://img.shields.io/badge/python-3.12+-blue) ![License](https://img.shields.io/badge/license-MIT-green)
+![Python](https://img.shields.io/badge/python-3.12+-blue) ![License](https://img.shields.io/badge/license-MIT-green)
+
+![Token Tracker Dashboard](screenshot.png)
 
 ## Features
 
