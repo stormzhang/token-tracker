@@ -39,15 +39,6 @@ tt claude         # 仅 Claude Code
 tt codex          # 仅 Codex
 ```
 
-## 数据源
-
-| Agent | 路径 | 格式 |
-|-------|------|------|
-| Claude Code | `~/.claude/projects/*/` | JSONL（逐条消息 usage） |
-| Codex | `~/.codex/sessions/` | JSONL + SQLite |
-
-Token Tracker 是**只读**的，不会修改任何 Agent 数据。
-
 ## 环境要求
 
 - Python 3.10+
