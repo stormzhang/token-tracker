@@ -4,7 +4,7 @@ from .adapters import claude
 from .adapters.rate_limits import load_rate_limits
 from .adapters.registry import detect_agents
 from .analyzer.aggregator import aggregate_daily, aggregate_monthly, aggregate_sessions, aggregate_weekly
-from .analyzer.blocks import analyze_blocks
+from .analyzer.blocks import analyze_blocks, calculate_p90
 from .hooks import is_setup, setup, unsetup
 from .ui.tables import (
     console, render_blocks, render_daily, render_dashboard,
@@ -47,7 +47,10 @@ def main():
         recent = claude.load_entries(hours_back=48)
         blocks = analyze_blocks(recent)
         rate_limits = load_rate_limits()
-        render_dashboard(daily, weekly, monthly, sessions, blocks, rate_limits)
+        p90 = None
+        if not rate_limits or rate_limits.five_hour_pct is None:
+            p90 = calculate_p90(daily)
+        render_dashboard(daily, weekly, monthly, sessions, blocks, rate_limits, p90)
     elif command == "daily":
         stats = aggregate_daily(entries)
         render_daily(stats)

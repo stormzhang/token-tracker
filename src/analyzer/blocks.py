@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
-from ..adapters.types import SessionBlock, UsageEntry
+from ..adapters.types import DailyStats, P90Limits, SessionBlock, UsageEntry
 from .cost import calculate_cost
 
 BLOCK_DURATION = timedelta(hours=5)
@@ -52,3 +52,22 @@ def analyze_blocks(entries: list[UsageEntry]) -> list[SessionBlock]:
                 block.burn_rate = block.total_tokens / elapsed
 
     return blocks
+
+
+def calculate_p90(daily_stats: list[DailyStats]) -> P90Limits:
+    if len(daily_stats) < 3:
+        return P90Limits()
+
+    token_values = sorted(d.total_tokens for d in daily_stats)
+    cost_values = sorted(d.cost_usd for d in daily_stats)
+    msg_values = sorted(d.message_count for d in daily_stats)
+
+    def p90(values: list) -> float:
+        idx = int(len(values) * 0.9)
+        return values[min(idx, len(values) - 1)]
+
+    return P90Limits(
+        token_limit=int(p90(token_values)),
+        cost_limit=round(p90(cost_values), 2),
+        message_limit=int(p90(msg_values)),
+    )

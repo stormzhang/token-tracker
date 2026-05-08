@@ -106,6 +106,13 @@ class RateLimits:
 
 
 @dataclass
+class P90Limits:
+    token_limit: int = 0
+    cost_limit: float = 0.0
+    message_limit: int = 0
+
+
+@dataclass
 class SessionBlock:
     start_time: datetime
     end_time: datetime

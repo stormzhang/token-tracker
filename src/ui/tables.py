@@ -8,7 +8,7 @@ from rich.table import Table
 from rich.text import Text
 from rich import box
 
-from ..adapters.types import DailyStats, MonthlyStats, RateLimits, SessionBlock, SessionStats, UsageEntry, WeeklyStats
+from ..adapters.types import DailyStats, MonthlyStats, P90Limits, RateLimits, SessionBlock, SessionStats, UsageEntry, WeeklyStats
 
 console = Console()
 
@@ -68,6 +68,26 @@ def _fmt_duration(minutes: float) -> str:
     return f"{int(minutes)}min"
 
 
+def _display_width(s: str) -> int:
+    w = 0
+    for ch in s:
+        w += 2 if ord(ch) > 0x7F else 1
+    return w
+
+
+def _append_bar(lines: Text, label: str, pct: float, bar_color: str,
+                bar_width: int, suffix: str = "") -> None:
+    filled = int(pct / 100 * bar_width)
+    bar = "█" * filled + "░" * (bar_width - filled)
+    bar_style = "red" if pct > 80 else "yellow" if pct > 50 else "green"
+    lines.append(label, style="dim")
+    lines.append(bar, style=bar_style)
+    lines.append(f"  {pct:.0f}%", style=bar_style)
+    if suffix:
+        lines.append(suffix, style="dim")
+    lines.append("\n")
+
+
 def _project_short(project: str) -> str:
     return project if project else "unknown"
 
@@ -111,6 +131,7 @@ def render_dashboard(
     sessions: list[SessionStats],
     blocks: list[SessionBlock],
     rate_limits: RateLimits | None = None,
+    p90: P90Limits | None = None,
 ) -> None:
     if not daily_stats:
         console.print("[yellow]暂无数据[/yellow]")
@@ -128,15 +149,22 @@ def render_dashboard(
         last_month = monthly_stats[-2] if len(monthly_stats) >= 2 else None
         _render_month_overview(monthly_stats[-1], last_month)
 
-    # --- 当前 5h & 7d 数据面板 ---
-    active_blocks = [b for b in blocks if not b.is_gap and b.is_active]
-    finished_blocks = [b for b in blocks if not b.is_gap and not b.is_active]
-    last_block = finished_blocks[-1] if finished_blocks else None
+    # --- 数据面板 ---
     cur_week = weekly_stats[-1] if weekly_stats else None
     last_week = weekly_stats[-2] if len(weekly_stats) >= 2 else None
-    if active_blocks:
-        for b in active_blocks:
-            _render_active_block(b, rate_limits, cur_week, last_block, last_week)
+
+    if p90 and (not rate_limits or rate_limits.five_hour_pct is None):
+        today = daily_stats[-1] if daily_stats else None
+        yesterday = daily_stats[-2] if len(daily_stats) >= 2 else None
+        if today:
+            _render_daily_panel(today, yesterday, p90, cur_week, last_week)
+    else:
+        active_blocks = [b for b in blocks if not b.is_gap and b.is_active]
+        finished_blocks = [b for b in blocks if not b.is_gap and not b.is_active]
+        last_block = finished_blocks[-1] if finished_blocks else None
+        if active_blocks:
+            for b in active_blocks:
+                _render_active_block(b, rate_limits, cur_week, last_block, last_week)
 
     # --- 最近十条会话 ---
     if sessions:
@@ -644,6 +672,75 @@ def render_blocks(blocks: list[SessionBlock]) -> None:
     console.print()
 
 
+def _render_daily_panel(
+    today: DailyStats,
+    yesterday: DailyStats | None,
+    p90: P90Limits,
+    week: WeeklyStats | None = None,
+    last_week: WeeklyStats | None = None,
+) -> None:
+    bar_width = 20 if _width_mode() == "compact" else 30
+    lines = Text()
+    lines.append("当日数据面板 (P90)\n\n", style="bold")
+
+    p90_items = [
+        ("Token Usage", today.total_tokens, p90.token_limit, _fmt_tokens),
+        ("Cost Usage", today.cost_usd, p90.cost_limit, _fmt_cost),
+        ("Msg Usage", today.message_count, p90.message_limit, lambda x: f"{x} 条"),
+    ]
+    max_pct = 0.0
+    for label, current, limit, unit_fmt in p90_items:
+        pct = min(current / limit * 100, 100) if limit > 0 else 0
+        max_pct = max(max_pct, pct)
+        display_label = f"  {label}" + " " * (14 - _display_width(label))
+        suffix = f"  {unit_fmt(current)} / {unit_fmt(limit)}"
+        _append_bar(lines, display_label, pct, "green", bar_width, suffix)
+        lines.append("\n")
+
+    lines.append(f"  Token     {_fmt_tokens(today.total_tokens)}", style="dim cyan")
+    if yesterday:
+        arrow = "↑" if today.total_tokens >= yesterday.total_tokens else "↓"
+        style = "red" if today.total_tokens >= yesterday.total_tokens else "green"
+        lines.append(f"{arrow}", style=style)
+    lines.append(f"  Output: {_fmt_tokens(today.output_tokens)}", style="dim")
+    lines.append(f"  Cache: {_fmt_tokens(today.cache_creation_tokens + today.cache_read_tokens)}\n", style="dim")
+    lines.append(f"  等效成本  {_fmt_cost(today.cost_usd)}", style="dim yellow")
+    if yesterday:
+        arrow = "↑" if today.cost_usd >= yesterday.cost_usd else "↓"
+        style = "red" if today.cost_usd >= yesterday.cost_usd else "green"
+        lines.append(f"{arrow}", style=style)
+    lines.append(f"  会话: {today.session_count}  消息: {today.message_count}", style="dim")
+    if today.message_count > 0:
+        tokens_per_msg = today.total_tokens // today.message_count
+        lines.append(f"  速率: {_fmt_tokens(tokens_per_msg)}/条", style="dim")
+
+    if week:
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        elapsed_days = now.weekday() + 1
+        daily_avg_cost = week.cost_usd / elapsed_days if elapsed_days > 0 else 0
+
+        lines.append(f"\n\n  本周 Token {_fmt_tokens(week.total_tokens)}", style="dim cyan")
+        if last_week:
+            arrow = "↑" if week.total_tokens >= last_week.total_tokens else "↓"
+            style = "red" if week.total_tokens >= last_week.total_tokens else "green"
+            lines.append(f"{arrow}", style=style)
+        lines.append(f"  Output: {_fmt_tokens(week.output_tokens)}", style="dim")
+        lines.append(f"  速率: {_fmt_tokens(week.total_tokens // elapsed_days)}/天\n", style="dim")
+        lines.append(f"  本周成本  {_fmt_cost(week.cost_usd)}", style="dim yellow")
+        if last_week:
+            arrow = "↑" if week.cost_usd >= last_week.cost_usd else "↓"
+            style = "red" if week.cost_usd >= last_week.cost_usd else "green"
+            lines.append(f"{arrow}", style=style)
+        lines.append(f"  日均: {_fmt_cost(daily_avg_cost)}", style="dim")
+        lines.append(f"  会话: {week.session_count}  消息: {week.message_count}", style="dim")
+
+    lines.append("\n")
+
+    panel_style = "red" if max_pct > 80 else "yellow" if max_pct > 50 else "green"
+    console.print(Panel(lines, border_style=panel_style, padding=(0, 1)))
+
+
 def _render_active_block(
     b: SessionBlock,
     rate_limits: RateLimits | None = None,
@@ -667,22 +764,11 @@ def _render_active_block(
 
     if rate_limits and rate_limits.five_hour_pct is not None:
         pct = rate_limits.five_hour_pct
-        limit_filled = int(pct / 100 * bar_width)
-        limit_bar = "█" * limit_filled + "░" * (bar_width - limit_filled)
-        if pct > 80:
-            limit_style = "red"
-        elif pct > 50:
-            limit_style = "yellow"
-        else:
-            limit_style = "green"
-
-        lines.append(f"  5h 限额    ", style="dim")
-        lines.append(limit_bar, style=limit_style)
-        lines.append(f"  {pct:.0f}%", style=limit_style)
+        reset_suffix = ""
         if rate_limits.five_hour_resets_at:
             reset_dt = datetime.fromtimestamp(rate_limits.five_hour_resets_at, tz=timezone.utc)
-            lines.append(f"  重置于 {reset_dt.strftime('%H:%M')}", style="dim")
-        lines.append("\n")
+            reset_suffix = f"  重置于 {reset_dt.strftime('%H:%M')}"
+        _append_bar(lines, f"  5h 限额    ", pct, "green", bar_width, reset_suffix)
 
     lines.append(f"  时间      ", style="dim")
     lines.append(f"已用 {elapsed_min}min / 剩余 {remaining_h}h{remaining_m:02d}m\n", style="dim")
@@ -702,33 +788,29 @@ def _render_active_block(
 
     if rate_limits and rate_limits.seven_day_pct is not None:
         pct_7d = rate_limits.seven_day_pct
-        filled_7d = int(pct_7d / 100 * bar_width)
-        bar_7d = "█" * filled_7d + "░" * (bar_width - filled_7d)
-
-        lines.append("\n\n")
-        lines.append(f"  7d 限额    ", style="dim")
-        lines.append(bar_7d, style="magenta")
-        lines.append(f"  {pct_7d:.0f}%", style="magenta")
+        reset_7d_suffix = ""
         if rate_limits.seven_day_resets_at:
             reset_dt = datetime.fromtimestamp(rate_limits.seven_day_resets_at, tz=timezone.utc)
-            lines.append(f"  重置于 {reset_dt.strftime('%m-%d %H:%M')}", style="dim")
-        lines.append("\n")
+            reset_7d_suffix = f"  重置于 {reset_dt.strftime('%m-%d %H:%M')}"
 
-    if week:
-        elapsed_days = now.weekday() + 1
-        daily_avg_cost = week.cost_usd / elapsed_days if elapsed_days > 0 else 0
+        lines.append("\n\n")
+        _append_bar(lines, f"  7d 限额    ", pct_7d, "cyan", bar_width, reset_7d_suffix)
 
-        lines.append(f"  Token     {_fmt_tokens(week.total_tokens)}", style="dim cyan")
-        if last_week:
-            arrow = "↑" if week.total_tokens >= last_week.total_tokens else "↓"
-            style = "red" if week.total_tokens >= last_week.total_tokens else "green"
-            lines.append(f"{arrow}", style=style)
-        lines.append(f"  Output: {_fmt_tokens(week.output_tokens)}", style="dim")
-        lines.append(f"  速率: {_fmt_tokens(week.total_tokens // elapsed_days)}/天\n", style="dim")
-        lines.append(f"  等效成本  {_fmt_cost(week.cost_usd)}", style="dim yellow")
-        lines.append(f"  日均: {_fmt_cost(daily_avg_cost)}", style="dim")
-        lines.append("\n")
-        lines.append(f"  消息      {week.message_count} 条  会话: {week.session_count}", style="dim")
+        if week:
+            elapsed_days = now.weekday() + 1
+            daily_avg_cost = week.cost_usd / elapsed_days if elapsed_days > 0 else 0
+
+            lines.append(f"  Token     {_fmt_tokens(week.total_tokens)}", style="dim cyan")
+            if last_week:
+                arrow = "↑" if week.total_tokens >= last_week.total_tokens else "↓"
+                style = "red" if week.total_tokens >= last_week.total_tokens else "green"
+                lines.append(f"{arrow}", style=style)
+            lines.append(f"  Output: {_fmt_tokens(week.output_tokens)}", style="dim")
+            lines.append(f"  速率: {_fmt_tokens(week.total_tokens // elapsed_days)}/天\n", style="dim")
+            lines.append(f"  等效成本  {_fmt_cost(week.cost_usd)}", style="dim yellow")
+            lines.append(f"  日均: {_fmt_cost(daily_avg_cost)}", style="dim")
+            lines.append("\n")
+            lines.append(f"  消息      {week.message_count} 条  会话: {week.session_count}", style="dim")
 
     lines.append("\n")
 
