@@ -321,7 +321,7 @@ def _render_recent_sessions(stats: list[SessionStats]) -> None:
     console.print(table)
 
 
-def render_daily(stats: list[DailyStats]) -> None:
+def render_daily(stats: list[DailyStats], agents: list[str] | None = None) -> None:
     if not stats:
         console.print(f"[{_S.warn}]暂无数据[/{_S.warn}]")
         return
@@ -331,7 +331,7 @@ def render_daily(stats: list[DailyStats]) -> None:
     total_msgs = sum(s.message_count for s in stats)
     total_sessions = sum(s.session_count for s in stats)
 
-    _render_header(["Claude Code"], total_tokens, total_cost, total_sessions, total_msgs, len(stats))
+    _render_header(agents or ["Claude Code"], total_tokens, total_cost, total_sessions, total_msgs, len(stats))
 
     mode = _width_mode()
     table = Table(box=box.SIMPLE_HEAVY, header_style="bold", padding=(0, 1), expand=True)
@@ -367,7 +367,7 @@ def render_daily(stats: list[DailyStats]) -> None:
     console.print()
 
 
-def render_weekly(stats: list[WeeklyStats]) -> None:
+def render_weekly(stats: list[WeeklyStats], agents: list[str] | None = None) -> None:
     if not stats:
         console.print(f"[{_S.warn}]暂无数据[/{_S.warn}]")
         return
@@ -377,7 +377,7 @@ def render_weekly(stats: list[WeeklyStats]) -> None:
     total_msgs = sum(s.message_count for s in stats)
     total_sessions = sum(s.session_count for s in stats)
 
-    _render_header(["Claude Code"], total_tokens, total_cost, total_sessions, total_msgs, len(stats) * 7)
+    _render_header(agents or ["Claude Code"], total_tokens, total_cost, total_sessions, total_msgs, len(stats) * 7)
 
     mode = _width_mode()
     table = Table(box=box.SIMPLE_HEAVY, header_style="bold", padding=(0, 1), expand=True)
@@ -431,7 +431,7 @@ def render_weekly(stats: list[WeeklyStats]) -> None:
     console.print()
 
 
-def render_monthly(stats: list[MonthlyStats]) -> None:
+def render_monthly(stats: list[MonthlyStats], agents: list[str] | None = None) -> None:
     if not stats:
         console.print(f"[{_S.warn}]暂无数据[/{_S.warn}]")
         return
@@ -442,7 +442,7 @@ def render_monthly(stats: list[MonthlyStats]) -> None:
     total_sessions = sum(s.session_count for s in stats)
     days = len(set(s.month for s in stats)) * 30
 
-    _render_header(["Claude Code"], total_tokens, total_cost, total_sessions, total_msgs, days)
+    _render_header(agents or ["Claude Code"], total_tokens, total_cost, total_sessions, total_msgs, days)
 
     mode = _width_mode()
     table = Table(box=box.SIMPLE_HEAVY, header_style="bold", padding=(0, 1), expand=True)

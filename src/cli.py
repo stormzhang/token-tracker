@@ -188,6 +188,7 @@ def main():
         return
 
     # 其他命令使用合并数据
+    agent_names = [a.name for a in agents]
     entries = _load_all_entries()
     if not entries:
         console.print("[yellow]暂无 token 使用数据[/yellow]")
@@ -195,13 +196,13 @@ def main():
 
     if command == "daily":
         stats = aggregate_daily(entries)
-        render_daily(stats)
+        render_daily(stats, agents=agent_names)
     elif command == "weekly":
         stats = aggregate_weekly(entries)
-        render_weekly(stats)
+        render_weekly(stats, agents=agent_names)
     elif command == "monthly":
         stats = aggregate_monthly(entries)
-        render_monthly(stats)
+        render_monthly(stats, agents=agent_names)
     elif command == "sessions":
         limit = 20
         if len(args) > 1:
