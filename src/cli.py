@@ -21,7 +21,9 @@ def _load_entries(agent_id: str, hours_back: int = 0):
 
 
 def _load_all_entries(hours_back: int = 0):
-    entries = claude.load_entries(hours_back=hours_back) + codex.load_entries(hours_back=hours_back)
+    entries = []
+    for agent_id in AGENT_LOADERS:
+        entries += _load_entries(agent_id, hours_back)
     entries.sort(key=lambda e: e.timestamp)
     return entries
 
@@ -50,12 +52,8 @@ def _build_agent_data(agent_id: str, agent_name: str) -> dict | None:
     sessions = aggregate_sessions(entries)
     recent = _load_entries(agent_id, hours_back=48)
     blocks = analyze_blocks(recent)
-    if agent_id == "claude-code":
-        rate_limits = load_claude_rate_limits()
-    elif agent_id == "codex":
-        rate_limits = codex.load_rate_limits()
-    else:
-        rate_limits = None
+    rate_loaders = {"claude-code": load_claude_rate_limits, "codex": codex.load_rate_limits}
+    rate_limits = rate_loaders.get(agent_id, lambda: None)()
     p90 = None
     has_limits = rate_limits and (rate_limits.five_hour_pct is not None or rate_limits.seven_day_pct is not None)
     if not has_limits:
@@ -118,20 +116,29 @@ def _show_interactive_dashboard(agents):
 
 
 def _read_key(tty, termios):
+    import os as _os
+    import select
     fd = sys.stdin.fileno()
     old = termios.tcgetattr(fd)
     try:
         tty.setraw(fd)
-        ch = sys.stdin.read(1)
-        if ch == "\x1b":
-            ch2 = sys.stdin.read(1)
-            if ch2 == "[":
-                ch3 = sys.stdin.read(1)
-                if ch3 == "D":
+        ch = _os.read(fd, 1)
+        if ch == b"\x1b":
+            if not select.select([fd], [], [], 0.05)[0]:
+                return "quit"
+            ch2 = _os.read(fd, 1)
+            if ch2 == b"[":
+                ch3 = _os.read(fd, 1)
+                if ch3 == b"D":
                     return "left"
-                if ch3 == "C":
+                if ch3 == b"C":
                     return "right"
-        if ch in ("q", "Q", "\x03"):
+            return "other"
+        if ch in (b"h", b"k"):
+            return "left"
+        if ch in (b"l", b"j"):
+            return "right"
+        if ch in (b"q", b"Q", b"\x03"):
             return "quit"
         return "other"
     finally:
