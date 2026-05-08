@@ -20,7 +20,7 @@ Supports **Claude Code** and **Codex** — see how many tokens you burn, what it
 ## Install
 
 ```bash
-pip install git+https://github.com/stormzhang/token-tracker.git
+pip install token-tracker
 ```
 
 ## Usage
@@ -29,11 +29,6 @@ pip install git+https://github.com/stormzhang/token-tracker.git
 tt                # interactive dashboard (arrow keys to switch agents)
 tt claude         # Claude Code only
 tt codex          # Codex only
-tt daily          # daily breakdown
-tt weekly         # weekly breakdown
-tt monthly        # monthly breakdown
-tt sessions       # recent sessions list
-tt blocks         # 5h billing block analysis
 ```
 
 ## Data Sources
