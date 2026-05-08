@@ -49,6 +49,22 @@ class DailyStats:
 
 
 @dataclass
+class WeeklyStats:
+    week: str
+    week_start: str = ""
+    week_end: str = ""
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_creation_tokens: int = 0
+    cache_read_tokens: int = 0
+    total_tokens: int = 0
+    cost_usd: float = 0.0
+    session_count: int = 0
+    message_count: int = 0
+    models: dict[str, int] = field(default_factory=dict)
+
+
+@dataclass
 class SessionStats:
     session_id: str
     project: str
@@ -77,6 +93,16 @@ class MonthlyStats:
     session_count: int = 0
     message_count: int = 0
     models: dict[str, int] = field(default_factory=dict)
+
+
+@dataclass
+class RateLimits:
+    five_hour_pct: float | None = None
+    five_hour_resets_at: int | None = None
+    seven_day_pct: float | None = None
+    seven_day_resets_at: int | None = None
+    model: str = ""
+    updated_at: str = ""
 
 
 @dataclass

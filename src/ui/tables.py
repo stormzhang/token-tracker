@@ -8,9 +8,19 @@ from rich.table import Table
 from rich.text import Text
 from rich import box
 
-from ..adapters.types import DailyStats, MonthlyStats, SessionBlock, SessionStats
+from ..adapters.types import DailyStats, MonthlyStats, RateLimits, SessionBlock, SessionStats, UsageEntry, WeeklyStats
 
 console = Console()
+
+
+def _width_mode() -> str:
+    w = console.width
+    if w < 100:
+        return "compact"
+    if w < 120:
+        return "medium"
+    return "wide"
+
 
 MODEL_SHORT = {
     "claude-opus-4-6": "Opus 4.6",
@@ -79,14 +89,197 @@ def _render_header(agents: list[str], total_tokens: int, total_cost: float,
         padding=(0, 1),
     ))
 
-    metrics = [
-        _make_metric("总 Token", _fmt_tokens(total_tokens), "bold cyan"),
-        _make_metric("等效成本", _fmt_cost(total_cost), "bold yellow"),
-        _make_metric("会话数", str(total_sessions), "bold magenta"),
-        _make_metric("消息数", str(total_messages), "bold white"),
-        _make_metric("使用天数", f"{days}天", "bold green"),
-    ]
-    console.print(Columns(metrics, equal=True, expand=True))
+    lines = Text()
+    lines.append("历史总览", style="bold")
+    lines.append(f"  Token: ", style="dim")
+    lines.append(f"{_fmt_tokens(total_tokens)}", style="bold cyan")
+    lines.append(f"  等效成本: ", style="dim")
+    lines.append(f"{_fmt_cost(total_cost)}", style="bold yellow")
+    lines.append(f"  会话: ", style="dim")
+    lines.append(f"{total_sessions}", style="bold")
+    lines.append(f"  消息: ", style="dim")
+    lines.append(f"{total_messages}", style="bold")
+    lines.append(f"  天数: ", style="dim")
+    lines.append(f"{days}天", style="bold green")
+    console.print(lines)
+
+
+def render_dashboard(
+    daily_stats: list[DailyStats],
+    weekly_stats: list[WeeklyStats],
+    monthly_stats: list[MonthlyStats],
+    sessions: list[SessionStats],
+    blocks: list[SessionBlock],
+    rate_limits: RateLimits | None = None,
+) -> None:
+    if not daily_stats:
+        console.print("[yellow]暂无数据[/yellow]")
+        return
+
+    total_tokens = sum(s.total_tokens for s in daily_stats)
+    total_cost = sum(s.cost_usd for s in daily_stats)
+    total_msgs = sum(s.message_count for s in daily_stats)
+    total_sessions = sum(s.session_count for s in daily_stats)
+
+    _render_header(["Claude Code"], total_tokens, total_cost, total_sessions, total_msgs, len(daily_stats))
+
+    # --- 本月概览 ---
+    if monthly_stats:
+        last_month = monthly_stats[-2] if len(monthly_stats) >= 2 else None
+        _render_month_overview(monthly_stats[-1], last_month)
+
+    # --- 当前 5h & 7d 数据面板 ---
+    active_blocks = [b for b in blocks if not b.is_gap and b.is_active]
+    finished_blocks = [b for b in blocks if not b.is_gap and not b.is_active]
+    last_block = finished_blocks[-1] if finished_blocks else None
+    cur_week = weekly_stats[-1] if weekly_stats else None
+    last_week = weekly_stats[-2] if len(weekly_stats) >= 2 else None
+    if active_blocks:
+        for b in active_blocks:
+            _render_active_block(b, rate_limits, cur_week, last_block, last_week)
+
+    # --- 最近十条会话 ---
+    if sessions:
+        _render_recent_sessions(sessions[:10])
+
+    console.print()
+
+
+def _render_month_overview(month: MonthlyStats, last_month: MonthlyStats | None = None) -> None:
+    now = datetime.now(timezone.utc)
+    elapsed_days = now.day
+    daily_avg_cost = month.cost_usd / elapsed_days if elapsed_days > 0 else 0
+
+    lines = Text()
+    lines.append("本月概览", style="bold")
+
+    lines.append(f"  Token: ", style="dim")
+    lines.append(f"{_fmt_tokens(month.total_tokens)}", style="bold cyan")
+    if last_month:
+        arrow = "↑" if month.total_tokens >= last_month.total_tokens else "↓"
+        style = "red" if month.total_tokens >= last_month.total_tokens else "green"
+        lines.append(f"{arrow}", style=style)
+
+    lines.append(f"  等效成本: ", style="dim")
+    lines.append(f"{_fmt_cost(month.cost_usd)}", style="bold yellow")
+
+    lines.append(f"  会话: ", style="dim")
+    lines.append(f"{month.session_count}", style="bold")
+    lines.append(f"  消息: ", style="dim")
+    lines.append(f"{month.message_count}", style="bold")
+    lines.append(f"  日均: ", style="dim")
+    lines.append(f"{_fmt_cost(daily_avg_cost)}", style="yellow")
+
+    console.print(lines)
+
+
+def _render_week_overview(week: WeeklyStats, last_week: WeeklyStats | None = None) -> None:
+    now = datetime.now(timezone.utc)
+    elapsed_days = now.weekday() + 1
+    daily_avg_cost = week.cost_usd / elapsed_days if elapsed_days > 0 else 0
+
+    lines = Text()
+    lines.append("本周概览", style="bold")
+
+    lines.append(f"  Token: ", style="dim")
+    lines.append(f"{_fmt_tokens(week.total_tokens)}", style="bold cyan")
+    if last_week:
+        arrow = "↑" if week.total_tokens >= last_week.total_tokens else "↓"
+        style = "red" if week.total_tokens >= last_week.total_tokens else "green"
+        lines.append(f"{arrow}", style=style)
+
+    lines.append(f"  等效成本: ", style="dim")
+    lines.append(f"{_fmt_cost(week.cost_usd)}", style="bold yellow")
+
+    lines.append(f"  会话: ", style="dim")
+    lines.append(f"{week.session_count}", style="bold")
+    lines.append(f"  消息: ", style="dim")
+    lines.append(f"{week.message_count}", style="bold")
+    lines.append(f"  日均: ", style="dim")
+    lines.append(f"{_fmt_cost(daily_avg_cost)}", style="yellow")
+
+    console.print(Panel(lines, border_style="blue", padding=(0, 0)))
+
+
+def _render_recent_daily(stats: list[DailyStats]) -> None:
+    if not stats:
+        return
+
+    mode = _width_mode()
+    table = Table(
+        title="最近 7 天",
+        box=box.SIMPLE_HEAVY,
+        header_style="bold",
+        padding=(0, 1),
+        expand=True,
+    )
+    table.add_column("日期", style="cyan", no_wrap=True)
+    if mode != "compact":
+        table.add_column("Input", justify="right")
+        table.add_column("Output", justify="right")
+    table.add_column("总Token", justify="right", style="bold")
+    table.add_column("等效成本", justify="right", style="green")
+    table.add_column("会话", justify="right", style="dim")
+    table.add_column("消息", justify="right", style="dim")
+
+    max_tokens = max(s.total_tokens for s in stats) if stats else 1
+
+    for s in stats:
+        ratio = s.total_tokens / max_tokens if max_tokens > 0 else 0
+        if ratio > 0.8:
+            token_style = "bold red"
+        elif ratio > 0.5:
+            token_style = "bold yellow"
+        else:
+            token_style = "bold"
+
+        row: list = [s.date]
+        if mode != "compact":
+            row += [_fmt_tokens(s.input_tokens), _fmt_tokens(s.output_tokens)]
+        row += [
+            Text(_fmt_tokens(s.total_tokens), style=token_style),
+            _fmt_cost(s.cost_usd),
+            str(s.session_count),
+            str(s.message_count),
+        ]
+        table.add_row(*row)
+
+    console.print(table)
+
+
+def _render_recent_sessions(stats: list[SessionStats]) -> None:
+    mode = _width_mode()
+    table = Table(
+        title="最近十条会话",
+        box=box.SIMPLE_HEAVY,
+        header_style="bold",
+        padding=(0, 1),
+        expand=True,
+    )
+    table.add_column("时间", style="cyan", no_wrap=True)
+    table.add_column("项目", no_wrap=True, max_width=14)
+    if mode != "compact":
+        table.add_column("模型", style="yellow", no_wrap=True)
+    table.add_column("Input", justify="right")
+    table.add_column("Output", justify="right")
+    table.add_column("总Token", justify="right", style="bold cyan")
+    table.add_column("等效成本", justify="right", style="green")
+    table.add_column("消息", justify="right", style="dim")
+
+    for s in stats:
+        row: list = [s.start_time.strftime("%m-%d %H:%M"), _project_short(s.project)]
+        if mode != "compact":
+            row.append(_model_short(s.model))
+        row += [
+            _fmt_tokens(s.input_tokens),
+            _fmt_tokens(s.output_tokens),
+            Text(_fmt_tokens(s.total_tokens), style="bold cyan"),
+            _fmt_cost(s.cost_usd),
+            str(s.message_count),
+        ]
+        table.add_row(*row)
+
+    console.print(table)
 
 
 def render_daily(stats: list[DailyStats]) -> None:
@@ -101,12 +294,16 @@ def render_daily(stats: list[DailyStats]) -> None:
 
     _render_header(["Claude Code"], total_tokens, total_cost, total_sessions, total_msgs, len(stats))
 
+    mode = _width_mode()
     table = Table(box=box.SIMPLE_HEAVY, header_style="bold", padding=(0, 1), expand=True)
     table.add_column("日期", style="cyan", no_wrap=True)
-    table.add_column("Output", justify="right")
-    table.add_column("Cache", justify="right")
+    if mode != "compact":
+        table.add_column("Input", justify="right")
+        table.add_column("Output", justify="right")
+    if mode == "wide":
+        table.add_column("Cache", justify="right")
     table.add_column("总Token", justify="right", style="bold")
-    table.add_column("成本", justify="right", style="green")
+    table.add_column("等效成本", justify="right", style="green")
     table.add_column("会话", justify="right", style="dim")
     table.add_column("消息", justify="right", style="dim")
 
@@ -122,16 +319,90 @@ def render_daily(stats: list[DailyStats]) -> None:
             token_style = "bold"
 
         cache_total = s.cache_creation_tokens + s.cache_read_tokens
-
-        table.add_row(
-            s.date,
-            _fmt_tokens(s.output_tokens),
-            _fmt_tokens(cache_total),
+        row: list = [s.date]
+        if mode != "compact":
+            row += [_fmt_tokens(s.input_tokens), _fmt_tokens(s.output_tokens)]
+        if mode == "wide":
+            row.append(_fmt_tokens(cache_total))
+        row += [
             Text(_fmt_tokens(s.total_tokens), style=token_style),
             _fmt_cost(s.cost_usd),
             str(s.session_count),
             str(s.message_count),
-        )
+        ]
+        table.add_row(*row)
+
+    console.print(table)
+    console.print()
+
+
+def render_weekly(stats: list[WeeklyStats]) -> None:
+    if not stats:
+        console.print("[yellow]暂无数据[/yellow]")
+        return
+
+    total_tokens = sum(s.total_tokens for s in stats)
+    total_cost = sum(s.cost_usd for s in stats)
+    total_msgs = sum(s.message_count for s in stats)
+    total_sessions = sum(s.session_count for s in stats)
+
+    _render_header(["Claude Code"], total_tokens, total_cost, total_sessions, total_msgs, len(stats) * 7)
+
+    mode = _width_mode()
+    table = Table(box=box.SIMPLE_HEAVY, header_style="bold", padding=(0, 1), expand=True)
+    table.add_column("周", style="cyan", no_wrap=True)
+    if mode != "compact":
+        table.add_column("Input", justify="right")
+        table.add_column("Output", justify="right")
+    if mode == "wide":
+        table.add_column("Cache", justify="right")
+    table.add_column("总Token", justify="right", style="bold")
+    table.add_column("等效成本", justify="right", style="green")
+    table.add_column("会话", justify="right", style="dim")
+    table.add_column("消息", justify="right", style="dim")
+
+    max_tokens = max(s.total_tokens for s in stats) if stats else 1
+
+    for s in stats:
+        ratio = s.total_tokens / max_tokens if max_tokens > 0 else 0
+        if ratio > 0.8:
+            token_style = "bold red"
+        elif ratio > 0.5:
+            token_style = "bold yellow"
+        else:
+            token_style = "bold"
+
+        cache_total = s.cache_creation_tokens + s.cache_read_tokens
+        week_label = f"{s.week_start} ~ {s.week_end}"
+        row: list = [week_label]
+        if mode != "compact":
+            row += [_fmt_tokens(s.input_tokens), _fmt_tokens(s.output_tokens)]
+        if mode == "wide":
+            row.append(_fmt_tokens(cache_total))
+        row += [
+            Text(_fmt_tokens(s.total_tokens), style=token_style),
+            _fmt_cost(s.cost_usd),
+            str(s.session_count),
+            str(s.message_count),
+        ]
+        table.add_row(*row)
+
+    table.add_section()
+    total_row: list = ["[bold]合计[/bold]"]
+    if mode != "compact":
+        total_row += [
+            _fmt_tokens(sum(s.input_tokens for s in stats)),
+            _fmt_tokens(sum(s.output_tokens for s in stats)),
+        ]
+    if mode == "wide":
+        total_row.append(_fmt_tokens(sum(s.cache_creation_tokens + s.cache_read_tokens for s in stats)))
+    total_row += [
+        f"[bold cyan]{_fmt_tokens(total_tokens)}[/bold cyan]",
+        f"[bold yellow]{_fmt_cost(total_cost)}[/bold yellow]",
+        str(total_sessions),
+        str(total_msgs),
+    ]
+    table.add_row(*total_row)
 
     console.print(table)
     console.print()
@@ -150,42 +421,53 @@ def render_monthly(stats: list[MonthlyStats]) -> None:
 
     _render_header(["Claude Code"], total_tokens, total_cost, total_sessions, total_msgs, days)
 
+    mode = _width_mode()
     table = Table(box=box.SIMPLE_HEAVY, header_style="bold", padding=(0, 1), expand=True)
     table.add_column("月份", style="cyan", no_wrap=True)
-    table.add_column("Input", justify="right")
-    table.add_column("Output", justify="right")
-    table.add_column("Cache创建", justify="right")
-    table.add_column("Cache读取", justify="right")
+    if mode != "compact":
+        table.add_column("Input", justify="right")
+        table.add_column("Output", justify="right")
+    if mode == "wide":
+        table.add_column("Cache创建", justify="right")
+        table.add_column("Cache读取", justify="right")
     table.add_column("总Token", justify="right", style="bold")
-    table.add_column("成本", justify="right", style="green")
+    table.add_column("等效成本", justify="right", style="green")
     table.add_column("会话", justify="right", style="dim")
     table.add_column("消息", justify="right", style="dim")
 
     for s in stats:
-        table.add_row(
-            s.month,
-            _fmt_tokens(s.input_tokens),
-            _fmt_tokens(s.output_tokens),
-            _fmt_tokens(s.cache_creation_tokens),
-            _fmt_tokens(s.cache_read_tokens),
+        row: list = [s.month]
+        if mode != "compact":
+            row += [_fmt_tokens(s.input_tokens), _fmt_tokens(s.output_tokens)]
+        if mode == "wide":
+            row += [_fmt_tokens(s.cache_creation_tokens), _fmt_tokens(s.cache_read_tokens)]
+        row += [
             _fmt_tokens(s.total_tokens),
             _fmt_cost(s.cost_usd),
             str(s.session_count),
             str(s.message_count),
-        )
+        ]
+        table.add_row(*row)
 
     table.add_section()
-    table.add_row(
-        "[bold]合计[/bold]",
-        _fmt_tokens(sum(s.input_tokens for s in stats)),
-        _fmt_tokens(sum(s.output_tokens for s in stats)),
-        _fmt_tokens(sum(s.cache_creation_tokens for s in stats)),
-        _fmt_tokens(sum(s.cache_read_tokens for s in stats)),
+    total_row: list = ["[bold]合计[/bold]"]
+    if mode != "compact":
+        total_row += [
+            _fmt_tokens(sum(s.input_tokens for s in stats)),
+            _fmt_tokens(sum(s.output_tokens for s in stats)),
+        ]
+    if mode == "wide":
+        total_row += [
+            _fmt_tokens(sum(s.cache_creation_tokens for s in stats)),
+            _fmt_tokens(sum(s.cache_read_tokens for s in stats)),
+        ]
+    total_row += [
         f"[bold cyan]{_fmt_tokens(total_tokens)}[/bold cyan]",
         f"[bold yellow]{_fmt_cost(total_cost)}[/bold yellow]",
         str(total_sessions),
         str(total_msgs),
-    )
+    ]
+    table.add_row(*total_row)
 
     console.print(table)
 
@@ -255,18 +537,23 @@ def render_sessions(stats: list[SessionStats], limit: int = 20) -> None:
     console.print(Panel(
         f"[bold]Token Tracker[/bold]  最近 {len(shown)} / {len(stats)} 个会话  "
         f"Token: [cyan]{_fmt_tokens(total_tokens)}[/cyan]  "
-        f"成本: [yellow]{_fmt_cost(total_cost)}[/yellow]",
+        f"等效成本: [yellow]{_fmt_cost(total_cost)}[/yellow]",
         border_style="blue",
         padding=(0, 1),
     ))
 
+    mode = _width_mode()
     table = Table(box=box.SIMPLE_HEAVY, header_style="bold", padding=(0, 1))
     table.add_column("时间", style="cyan", no_wrap=True)
-    table.add_column("项目", no_wrap=True)
-    table.add_column("模型", style="yellow", no_wrap=True)
-    table.add_column("时长", justify="right")
+    table.add_column("项目", no_wrap=True, max_width=14)
+    if mode != "compact":
+        table.add_column("模型", style="yellow", no_wrap=True)
+        table.add_column("时长", justify="right")
+    if mode == "wide":
+        table.add_column("Input", justify="right")
+        table.add_column("Output", justify="right")
     table.add_column("总Token", justify="right", style="bold")
-    table.add_column("成本", justify="right", style="green")
+    table.add_column("等效成本", justify="right", style="green")
     table.add_column("消息", justify="right", style="dim")
 
     max_tokens = max(s.total_tokens for s in shown) if shown else 1
@@ -280,15 +567,17 @@ def render_sessions(stats: list[SessionStats], limit: int = 20) -> None:
         else:
             token_style = "bold"
 
-        table.add_row(
-            s.start_time.strftime("%m-%d %H:%M"),
-            _project_short(s.project),
-            _model_short(s.model),
-            _fmt_duration(s.duration_minutes),
+        row: list = [s.start_time.strftime("%m-%d %H:%M"), _project_short(s.project)]
+        if mode != "compact":
+            row += [_model_short(s.model), _fmt_duration(s.duration_minutes)]
+        if mode == "wide":
+            row += [_fmt_tokens(s.input_tokens), _fmt_tokens(s.output_tokens)]
+        row += [
             Text(_fmt_tokens(s.total_tokens), style=token_style),
             _fmt_cost(s.cost_usd),
             str(s.message_count),
-        )
+        ]
+        table.add_row(*row)
 
     console.print(table)
     console.print()
@@ -312,19 +601,22 @@ def render_blocks(blocks: list[SessionBlock]) -> None:
         for b in active:
             _render_active_block(b)
 
+    mode = _width_mode()
     table = Table(
         title="历史计费块",
         box=box.SIMPLE_HEAVY,
         header_style="bold",
         padding=(0, 1),
-        expand=True,
     )
     table.add_column("时间段", style="cyan", no_wrap=True)
     table.add_column("状态", justify="center", no_wrap=True)
-    table.add_column("Output", justify="right")
+    if mode == "wide":
+        table.add_column("Input", justify="right")
+        table.add_column("Output", justify="right")
     table.add_column("总Token", justify="right", style="bold")
-    table.add_column("成本", justify="right", style="green")
-    table.add_column("速率", justify="right")
+    table.add_column("等效成本", justify="right", style="green")
+    if mode != "compact":
+        table.add_column("速率", justify="right")
     table.add_column("消息", justify="right", style="dim")
 
     for b in active_blocks:
@@ -334,64 +626,121 @@ def render_blocks(blocks: list[SessionBlock]) -> None:
 
         if b.is_active:
             status = Text("● 活跃", style="bold green")
-            elapsed = (datetime.now(timezone.utc) - b.start_time).total_seconds() / 60
             rate = f"{_fmt_tokens(int(b.burn_rate))}/min" if b.burn_rate > 0 else "-"
         else:
             status = Text("  结束", style="dim")
             rate = "-"
 
-        table.add_row(
-            time_range,
-            status,
-            _fmt_tokens(b.output_tokens),
-            _fmt_tokens(b.total_tokens),
-            _fmt_cost(b.cost_usd),
-            rate,
-            str(len(b.entries)),
-        )
+        row: list = [time_range, status]
+        if mode == "wide":
+            row += [_fmt_tokens(b.input_tokens), _fmt_tokens(b.output_tokens)]
+        row += [_fmt_tokens(b.total_tokens), _fmt_cost(b.cost_usd)]
+        if mode != "compact":
+            row.append(rate)
+        row.append(str(len(b.entries)))
+        table.add_row(*row)
 
     console.print(table)
     console.print()
 
 
-def _render_active_block(b: SessionBlock) -> None:
+def _render_active_block(
+    b: SessionBlock,
+    rate_limits: RateLimits | None = None,
+    week: WeeklyStats | None = None,
+    last_block: SessionBlock | None = None,
+    last_week: WeeklyStats | None = None,
+) -> None:
     now = datetime.now(timezone.utc)
     elapsed = (now - b.start_time).total_seconds()
     remaining = (b.end_time - now).total_seconds()
-    progress = elapsed / (5 * 3600)
 
     elapsed_min = int(elapsed / 60)
     remaining_min = int(remaining / 60)
     remaining_h = remaining_min // 60
     remaining_m = remaining_min % 60
 
-    bar_width = 30
-    filled = int(progress * bar_width)
-    bar = "█" * filled + "░" * (bar_width - filled)
-
-    if progress > 0.8:
-        bar_style = "red"
-    elif progress > 0.5:
-        bar_style = "yellow"
-    else:
-        bar_style = "green"
-
-    projected = int(b.total_tokens / progress) if progress > 0 else 0
+    bar_width = 20 if _width_mode() == "compact" else 30
 
     lines = Text()
-    lines.append("当前活跃计费块\n\n", style="bold")
-    lines.append(f"  时间  ", style="dim")
-    lines.append(bar, style=bar_style)
-    lines.append(f"  {int(progress * 100)}%\n")
-    lines.append(f"         已用 {elapsed_min}min / 剩余 {remaining_h}h{remaining_m:02d}m\n\n", style="dim")
-    lines.append(f"  Token ", style="dim")
-    lines.append(f"{_fmt_tokens(b.total_tokens)}", style="bold cyan")
+    lines.append("当前 5h&7d 数据面板\n\n", style="bold")
+
+    if rate_limits and rate_limits.five_hour_pct is not None:
+        pct = rate_limits.five_hour_pct
+        limit_filled = int(pct / 100 * bar_width)
+        limit_bar = "█" * limit_filled + "░" * (bar_width - limit_filled)
+        if pct > 80:
+            limit_style = "red"
+        elif pct > 50:
+            limit_style = "yellow"
+        else:
+            limit_style = "green"
+
+        lines.append(f"  5h 限额    ", style="dim")
+        lines.append(limit_bar, style=limit_style)
+        lines.append(f"  {pct:.0f}%", style=limit_style)
+        if rate_limits.five_hour_resets_at:
+            reset_dt = datetime.fromtimestamp(rate_limits.five_hour_resets_at, tz=timezone.utc)
+            lines.append(f"  重置于 {reset_dt.strftime('%H:%M')}", style="dim")
+        lines.append("\n")
+
+    lines.append(f"  时间      ", style="dim")
+    lines.append(f"已用 {elapsed_min}min / 剩余 {remaining_h}h{remaining_m:02d}m\n", style="dim")
+
+    lines.append(f"  Token     {_fmt_tokens(b.total_tokens)}", style="dim cyan")
+    if last_block:
+        arrow = "↑" if b.total_tokens >= last_block.total_tokens else "↓"
+        style = "red" if b.total_tokens >= last_block.total_tokens else "green"
+        lines.append(f"{arrow}", style=style)
     lines.append(f"  Output: {_fmt_tokens(b.output_tokens)}", style="dim")
     lines.append(f"  速率: {_fmt_tokens(int(b.burn_rate))}/min\n", style="dim")
-    lines.append(f"  成本  ", style="dim")
-    lines.append(f"{_fmt_cost(b.cost_usd)}", style="bold yellow")
-    lines.append(f"  预计本窗口: {_fmt_cost(b.cost_usd / progress if progress > 0 else 0)}\n", style="dim")
-    lines.append(f"  消息  ", style="dim")
-    lines.append(f"{len(b.entries)} 条\n", style="bold")
+    lines.append(f"  等效成本  {_fmt_cost(b.cost_usd)}", style="dim yellow")
+    if rate_limits and rate_limits.model:
+        lines.append(f"  模型: {rate_limits.model}", style="dim")
+    lines.append("\n")
+    lines.append(f"  消息      {len(b.entries)} 条", style="dim")
 
-    console.print(Panel(lines, border_style=bar_style, padding=(0, 1)))
+    if rate_limits and rate_limits.seven_day_pct is not None:
+        pct_7d = rate_limits.seven_day_pct
+        filled_7d = int(pct_7d / 100 * bar_width)
+        bar_7d = "█" * filled_7d + "░" * (bar_width - filled_7d)
+
+        lines.append("\n\n")
+        lines.append(f"  7d 限额    ", style="dim")
+        lines.append(bar_7d, style="magenta")
+        lines.append(f"  {pct_7d:.0f}%", style="magenta")
+        if rate_limits.seven_day_resets_at:
+            reset_dt = datetime.fromtimestamp(rate_limits.seven_day_resets_at, tz=timezone.utc)
+            lines.append(f"  重置于 {reset_dt.strftime('%m-%d %H:%M')}", style="dim")
+        lines.append("\n")
+
+    if week:
+        elapsed_days = now.weekday() + 1
+        daily_avg_cost = week.cost_usd / elapsed_days if elapsed_days > 0 else 0
+
+        lines.append(f"  Token     {_fmt_tokens(week.total_tokens)}", style="dim cyan")
+        if last_week:
+            arrow = "↑" if week.total_tokens >= last_week.total_tokens else "↓"
+            style = "red" if week.total_tokens >= last_week.total_tokens else "green"
+            lines.append(f"{arrow}", style=style)
+        lines.append(f"  Output: {_fmt_tokens(week.output_tokens)}", style="dim")
+        lines.append(f"  速率: {_fmt_tokens(week.total_tokens // elapsed_days)}/天\n", style="dim")
+        lines.append(f"  等效成本  {_fmt_cost(week.cost_usd)}", style="dim yellow")
+        lines.append(f"  日均: {_fmt_cost(daily_avg_cost)}", style="dim")
+        lines.append("\n")
+        lines.append(f"  消息      {week.message_count} 条  会话: {week.session_count}", style="dim")
+
+    lines.append("\n")
+
+    if rate_limits and rate_limits.five_hour_pct is not None:
+        pct = rate_limits.five_hour_pct
+        if pct > 80:
+            panel_style = "red"
+        elif pct > 50:
+            panel_style = "yellow"
+        else:
+            panel_style = "green"
+    else:
+        panel_style = "green"
+
+    console.print(Panel(lines, border_style=panel_style, padding=(0, 1)))

@@ -1,7 +1,7 @@
 from collections import defaultdict
 from datetime import datetime
 
-from ..adapters.types import DailyStats, MonthlyStats, SessionStats, UsageEntry
+from ..adapters.types import DailyStats, MonthlyStats, SessionStats, UsageEntry, WeeklyStats
 from .cost import calculate_cost
 
 
@@ -55,6 +55,40 @@ def aggregate_monthly(entries: list[UsageEntry]) -> list[MonthlyStats]:
         by_month[month_str].session_count = len(sessions)
 
     return sorted(by_month.values(), key=lambda s: s.month)
+
+
+def aggregate_weekly(entries: list[UsageEntry]) -> list[WeeklyStats]:
+    from datetime import timedelta
+
+    by_week: dict[str, WeeklyStats] = {}
+    sessions_by_week: dict[str, set[str]] = defaultdict(set)
+
+    for e in entries:
+        monday = e.timestamp.date() - timedelta(days=e.timestamp.weekday())
+        sunday = monday + timedelta(days=6)
+        week_key = monday.isoformat()
+        if week_key not in by_week:
+            by_week[week_key] = WeeklyStats(
+                week=week_key,
+                week_start=monday.strftime("%m-%d"),
+                week_end=sunday.strftime("%m-%d"),
+            )
+        s = by_week[week_key]
+        cost = calculate_cost(e)
+        s.input_tokens += e.input_tokens
+        s.output_tokens += e.output_tokens
+        s.cache_creation_tokens += e.cache_creation_tokens
+        s.cache_read_tokens += e.cache_read_tokens
+        s.total_tokens += e.total_tokens
+        s.cost_usd += cost
+        s.message_count += 1
+        s.models[e.model] = s.models.get(e.model, 0) + e.total_tokens
+        sessions_by_week[week_key].add(e.session_id)
+
+    for week_key, sessions in sessions_by_week.items():
+        by_week[week_key].session_count = len(sessions)
+
+    return sorted(by_week.values(), key=lambda s: s.week)
 
 
 def aggregate_sessions(entries: list[UsageEntry]) -> list[SessionStats]:

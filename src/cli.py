@@ -1,15 +1,27 @@
 import sys
 
 from .adapters import claude
+from .adapters.rate_limits import load_rate_limits
 from .adapters.registry import detect_agents
-from .analyzer.aggregator import aggregate_daily, aggregate_monthly, aggregate_sessions
+from .analyzer.aggregator import aggregate_daily, aggregate_monthly, aggregate_sessions, aggregate_weekly
 from .analyzer.blocks import analyze_blocks
-from .ui.tables import console, render_blocks, render_daily, render_monthly, render_sessions
+from .hooks import is_setup, setup, unsetup
+from .ui.tables import (
+    console, render_blocks, render_daily, render_dashboard,
+    render_monthly, render_sessions, render_weekly,
+)
 
 
 def main():
     args = sys.argv[1:]
-    command = args[0] if args else "daily"
+    command = args[0] if args else "dashboard"
+
+    if command == "setup":
+        setup()
+        return
+    if command == "unsetup":
+        unsetup()
+        return
 
     agents = detect_agents()
     if not agents:
@@ -23,9 +35,25 @@ def main():
         console.print("[yellow]暂无 token 使用数据[/yellow]")
         sys.exit(0)
 
-    if command == "daily":
+    if command == "dashboard":
+        if not is_setup():
+            console.print("[dim]首次运行，自动配置 statusLine hook...[/dim]")
+            setup()
+            console.print()
+        daily = aggregate_daily(entries)
+        weekly = aggregate_weekly(entries)
+        monthly = aggregate_monthly(entries)
+        sessions = aggregate_sessions(entries)
+        recent = claude.load_entries(hours_back=48)
+        blocks = analyze_blocks(recent)
+        rate_limits = load_rate_limits()
+        render_dashboard(daily, weekly, monthly, sessions, blocks, rate_limits)
+    elif command == "daily":
         stats = aggregate_daily(entries)
         render_daily(stats)
+    elif command == "weekly":
+        stats = aggregate_weekly(entries)
+        render_weekly(stats)
     elif command == "monthly":
         stats = aggregate_monthly(entries)
         render_monthly(stats)
@@ -50,7 +78,7 @@ def main():
         render_blocks(blocks)
     else:
         console.print(f"[red]未知命令: {command}[/red]")
-        console.print("[dim]可用命令: daily, monthly, sessions, blocks[/dim]")
+        console.print("[dim]可用命令: dashboard, daily, weekly, monthly, sessions, blocks, setup, unsetup[/dim]")
         sys.exit(1)
 
 
