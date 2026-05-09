@@ -12,9 +12,11 @@
 
 ```
 docs/
-└── terminal-integrations.md  # 终端状态集成规划
+├── terminal-integrations.md  # 终端状态集成规划
+└── competitors.md            # 竞品与参考工具分析
 src/
 ├── cli.py              # CLI 入口，命令路由，交互式 tab 切换
+├── hooks.py            # statusLine hook 管理（安装/卸载/脚本生成）
 ├── adapters/           # 数据源适配器
 │   ├── types.py        # 统一数据模型
 │   ├── claude.py       # Claude Code JSONL 解析
@@ -26,7 +28,6 @@ src/
 │   ├── blocks.py       # 5h 计费块 + burn rate
 │   └── cost.py         # LiteLLM 定价 + 成本计算
 └── ui/
-    ├── progress.py     # 终端进度条渲染
     └── tables.py       # Rich 表格渲染
 ```
 
@@ -34,9 +35,6 @@ src/
 
 ```bash
 python -m src.cli                # 交互式 dashboard（多 Agent 时左右切换）
-python -m src.cli status         # 终端状态栏单行输出
-python -m src.cli status claude  # Claude Code 状态
-python -m src.cli status codex   # Codex 状态
 python -m src.cli claude         # Claude Code dashboard
 python -m src.cli codex          # Codex dashboard
 python -m src.cli daily
@@ -45,6 +43,23 @@ python -m src.cli monthly
 python -m src.cli sessions
 python -m src.cli blocks
 ```
+
+## statusLine Hook
+
+通过 Claude Code 的 statusLine 机制，注册 `~/.claude/my-statusline.py` 为自定义命令。Claude Code 每次更新状态时通过 stdin 推送 JSON，脚本一方面格式化输出到 stdout 供 Claude Code 显示状态栏，一方面将完整数据写入 `~/.claude/tt-status.json` 供 token-tracker CLI 读取。
+
+**数据流**：Claude Code stdin → my-statusline.py → stdout（状态栏显示）+ tt-status.json（持久化）
+
+**状态栏显示内容**（按顺序）：
+- 项目名（`workspace.project_dir` 最后一级目录）
+- 上下文进度（`context_window.used_percentage`，带颜色进度条）
+- 5h 限额（`rate_limits.five_hour.used_percentage`，带颜色进度条）
+- 7d 限额（`rate_limits.seven_day.used_percentage`，带颜色进度条）
+- 模型名（`model.display_name`）
+
+**进度条颜色**：绿色（< 50%）→ 黄色（50-80%）→ 红色（> 80%）
+
+**stdin 可用字段**：session_id, transcript_path, cwd, session_name, model, workspace, version, output_style, cost（total_cost_usd/duration/lines_added/lines_removed）, context_window（used_percentage/token 明细）, exceeds_200k_tokens, fast_mode, effort, thinking, rate_limits
 
 ## 数据源
 

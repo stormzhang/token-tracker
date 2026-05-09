@@ -5,30 +5,87 @@ import stat
 from .ui.tables import console
 
 CLAUDE_SETTINGS = os.path.expanduser("~/.claude/settings.json")
-HOOK_SCRIPT_PATH = os.path.expanduser("~/.claude/tt-statusline.py")
+HOOK_SCRIPT_PATH = os.path.expanduser("~/.claude/my-statusline.py")
 BACKUP_KEY = "tokenTracker"
 PREVIOUS_STATUSLINE_KEY = "previousStatusLine"
 
 HOOK_SCRIPT = r'''#!/usr/bin/env python3
-"""Token Tracker statusLine hook — captures full statusLine data from Claude Code."""
-import json
-import os
-import sys
-import tempfile
+"""Claude Code statusLine — 状态栏显示 + 数据持久化到 tt-status.json"""
+import json, os, sys, tempfile
 from datetime import datetime, timezone
 
 STATUS_FILE = os.path.expanduser("~/.claude/tt-status.json")
-FILLED_CHAR = "█"
-EMPTY_CHAR = "░"
-BAR_WIDTH = 8
+BAR = ("█", "░", 8)
+C = {
+    "green": "\033[32m", "yellow": "\033[33m", "red": "\033[31m",
+    "cyan": "\033[36m", "blue": "\033[34m", "magenta": "\033[35m",
+    "peach": "\033[38;5;216m", "dim": "\033[2m", "reset": "\033[0m",
+}
 
 
-def render_progress(value):
+def color_by_pct(pct):
+    return C["green"] if pct < 50 else C["yellow"] if pct < 80 else C["red"]
+
+
+def fmt_tokens(n):
+    if n >= 1_000_000: return f"{n/1_000_000:.1f}M"
+    if n >= 1_000: return f"{n/1_000:.0f}k"
+    return str(n)
+
+
+def progress_bar(value):
+    filled_char, empty_char, width = BAR
     if value is None:
-        return EMPTY_CHAR * BAR_WIDTH + " n/a"
+        return empty_char * width + " n/a"
     pct = max(0.0, min(100.0, float(value)))
-    filled = round(pct / 100 * BAR_WIDTH)
-    return FILLED_CHAR * filled + EMPTY_CHAR * (BAR_WIDTH - filled) + f" {pct:.0f}%"
+    filled = round(pct / 100 * width)
+    return f"{color_by_pct(pct)}{filled_char * filled}{C['reset']}{empty_char * (width - filled)} {pct:.0f}%"
+
+
+def save_data(data):
+    data["_received_at"] = datetime.now(timezone.utc).isoformat()
+    try:
+        fd, tmp = tempfile.mkstemp(dir=os.path.dirname(STATUS_FILE), suffix=".tmp")
+        with os.fdopen(fd, "w") as f:
+            json.dump(data, f)
+        os.replace(tmp, STATUS_FILE)
+    except OSError:
+        pass
+
+
+def render(data):
+    parts = []
+
+    project = data.get("workspace", {}).get("project_dir", "")
+    if project:
+        parts.append(f"{C['cyan']}{os.path.basename(project)}{C['reset']}")
+
+    rl = data.get("rate_limits", {})
+    for key, label in [("five_hour", "5h"), ("seven_day", "7d")]:
+        pct = rl.get(key, {}).get("used_percentage")
+        if pct is not None:
+            parts.append(f"{C['blue']}{label}:{C['reset']}{progress_bar(pct)}")
+
+    ctx = data.get("context_window", {})
+    if ctx.get("used_percentage") is not None:
+        size = ctx.get("context_window_size", 0)
+        parts.append(f"{C['yellow']}{fmt_tokens(size)} CTX: {ctx['used_percentage']:.0f}%{C['reset']}")
+
+    total_in = ctx.get("total_input_tokens", 0)
+    total_out = ctx.get("total_output_tokens", 0)
+    cache = ctx.get("current_usage", {}).get("cache_read_input_tokens", 0)
+    if total_in or total_out:
+        parts.append(f"{C['peach']}Tokens: {fmt_tokens(total_in)}↑ {fmt_tokens(total_out)}↓ cache:{fmt_tokens(cache)}{C['reset']}")
+
+    model_name = data.get("model", {}).get("display_name", "")
+    if model_name:
+        effort = data.get("effort", {}).get("level", "")
+        if effort:
+            model_name += f"{C['dim']}/{effort}{C['reset']}"
+        parts.append(f"{C['magenta']}{model_name}{C['reset']}")
+
+    if parts:
+        print(" | ".join(parts))
 
 
 def main():
@@ -39,29 +96,8 @@ def main():
         data = json.loads(raw)
     except Exception:
         return
-
-    data["_received_at"] = datetime.now(timezone.utc).isoformat()
-
-    try:
-        fd, tmp = tempfile.mkstemp(
-            dir=os.path.dirname(STATUS_FILE), suffix=".tmp"
-        )
-        with os.fdopen(fd, "w") as f:
-            json.dump(data, f)
-        os.replace(tmp, STATUS_FILE)
-    except OSError:
-        pass
-
-    parts = []
-    rl = data.get("rate_limits", {})
-    five = rl.get("five_hour", {})
-    seven = rl.get("seven_day", {})
-    if five.get("used_percentage") is not None:
-        parts.append(f"5h:{render_progress(five['used_percentage'])}")
-    if seven.get("used_percentage") is not None:
-        parts.append(f"7d:{render_progress(seven['used_percentage'])}")
-    if parts:
-        print(" ".join(parts))
+    save_data(data)
+    render(data)
 
 
 if __name__ == "__main__":
@@ -76,7 +112,7 @@ def is_setup() -> bool:
         with open(CLAUDE_SETTINGS, "r", encoding="utf-8") as f:
             settings = json.load(f)
         cmd = settings.get("statusLine", {}).get("command", "")
-        return "tt-statusline" in cmd and os.path.exists(HOOK_SCRIPT_PATH)
+        return "my-statusline" in cmd and os.path.exists(HOOK_SCRIPT_PATH)
     except (json.JSONDecodeError, OSError):
         return False
 
@@ -84,7 +120,7 @@ def is_setup() -> bool:
 def _is_token_tracker_statusline(status_line: dict | None) -> bool:
     if not isinstance(status_line, dict):
         return False
-    return "tt-statusline" in (status_line.get("command") or "")
+    return "my-statusline" in (status_line.get("command") or "")
 
 
 def setup() -> None:
@@ -101,9 +137,9 @@ def setup() -> None:
     existing = settings.get("statusLine")
     if existing:
         cmd = existing.get("command", "")
-        if "tt-statusline" not in cmd:
+        if "my-statusline" not in cmd:
             console.print(f"[yellow]检测到已有 statusLine 配置: {cmd}[/yellow]")
-            console.print("[yellow]将替换为 Token Tracker hook，并备份原配置用于 unsetup 恢复[/yellow]")
+            console.print("[yellow]将替换为 statusLine hook，并备份原配置用于 unsetup 恢复[/yellow]")
             backup = settings.setdefault(BACKUP_KEY, {})
             backup[PREVIOUS_STATUSLINE_KEY] = existing
 
@@ -150,7 +186,7 @@ def unsetup() -> None:
             with open(CLAUDE_SETTINGS, "w", encoding="utf-8") as f:
                 json.dump(settings, f, indent=2, ensure_ascii=False)
         else:
-            console.print("[dim]当前 statusLine 不是 Token Tracker，保留现有配置[/dim]")
+            console.print("[dim]当前 statusLine 不是 my-statusline，保留现有配置[/dim]")
     else:
         console.print("[dim]settings.json 不存在[/dim]")
 
