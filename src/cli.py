@@ -1,11 +1,14 @@
 import sys
+from datetime import datetime
 
 from .adapters import claude, codex
 from .adapters.rate_limits import load_rate_limits as load_claude_rate_limits
 from .adapters.registry import detect_agents
 from .analyzer.aggregator import aggregate_daily, aggregate_monthly, aggregate_sessions, aggregate_weekly
 from .analyzer.blocks import analyze_blocks, calculate_p90
+from .analyzer.cost import calculate_cost
 from .hooks import is_setup, setup, unsetup
+from .ui.progress import render_progress, use_color
 from .ui.tables import (
     console, render_blocks, render_daily, render_dashboard,
     render_monthly, render_sessions, render_tab_bar, render_weekly,
@@ -13,6 +16,8 @@ from .ui.tables import (
 
 AGENT_ALIASES = {"claude": "claude-code", "codex": "codex"}
 AGENT_LOADERS = {"claude-code": claude, "codex": codex}
+AGENT_NAMES = {"claude-code": "Claude", "codex": "Codex"}
+RATE_LIMIT_LOADERS = {"claude-code": load_claude_rate_limits, "codex": codex.load_rate_limits}
 
 
 def _load_entries(agent_id: str, hours_back: int = 0):
@@ -26,6 +31,138 @@ def _load_all_entries(hours_back: int = 0):
         entries += _load_entries(agent_id, hours_back)
     entries.sort(key=lambda e: e.timestamp)
     return entries
+
+
+def _parse_status_args(args: list[str]) -> dict:
+    opts = {
+        "agent": None,
+        "color": None,
+        "fields": {"limits"},
+        "format": "compact",
+    }
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg == "--color":
+            opts["color"] = True
+        elif arg == "--no-color":
+            opts["color"] = False
+        elif arg == "--agent" and i + 1 < len(args):
+            opts["agent"] = AGENT_ALIASES.get(args[i + 1], args[i + 1])
+            i += 1
+        elif arg.startswith("--agent="):
+            value = arg.split("=", 1)[1]
+            opts["agent"] = AGENT_ALIASES.get(value, value)
+        elif arg == "--fields" and i + 1 < len(args):
+            opts["fields"] = set(filter(None, args[i + 1].split(",")))
+            i += 1
+        elif arg.startswith("--fields="):
+            opts["fields"] = set(filter(None, arg.split("=", 1)[1].split(",")))
+        elif arg == "--format" and i + 1 < len(args):
+            opts["format"] = args[i + 1]
+            i += 1
+        elif arg.startswith("--format="):
+            opts["format"] = arg.split("=", 1)[1]
+        elif arg == "--claude":
+            opts["agent"] = "claude-code"
+        elif arg == "--codex":
+            opts["agent"] = "codex"
+        elif arg in AGENT_ALIASES:
+            opts["agent"] = AGENT_ALIASES[arg]
+        i += 1
+    return opts
+
+
+def _fmt_pct(value: float | None) -> str:
+    if value is None:
+        return "n/a"
+    return f"{value:.0f}%"
+
+
+def _fmt_tokens_compact(value: int) -> str:
+    if value >= 1_000_000_000:
+        return f"{value / 1_000_000_000:.2f}B"
+    if value >= 1_000_000:
+        return f"{value / 1_000_000:.1f}M"
+    if value >= 1_000:
+        return f"{value / 1_000:.1f}K"
+    return str(value)
+
+
+def _build_status_item(agent_id: str, fields: set[str]) -> dict:
+    rate_loader = RATE_LIMIT_LOADERS.get(agent_id)
+    rate_limits = rate_loader() if rate_loader else None
+    has_limits = rate_limits and (
+        rate_limits.five_hour_pct is not None
+        or rate_limits.seven_day_pct is not None
+    )
+    item = {
+        "agent_id": agent_id,
+        "name": AGENT_NAMES.get(agent_id, agent_id),
+        "limits": {
+            "five_hour_pct": rate_limits.five_hour_pct if rate_limits else None,
+            "five_hour_resets_at": rate_limits.five_hour_resets_at if rate_limits else None,
+            "seven_day_pct": rate_limits.seven_day_pct if rate_limits else None,
+            "seven_day_resets_at": rate_limits.seven_day_resets_at if rate_limits else None,
+        },
+    }
+
+    if "tokens" in fields or "cost" in fields or not has_limits:
+        today = datetime.now().astimezone().date()
+        total_tokens = 0
+        total_cost = 0.0
+        for entry in _load_entries(agent_id):
+            if entry.timestamp.astimezone().date() == today:
+                total_tokens += entry.total_tokens
+                total_cost += calculate_cost(entry)
+        item["today"] = {
+            "tokens": total_tokens,
+            "cost_usd": round(total_cost, 6),
+        }
+
+    return item
+
+
+def _render_status_text(
+    items: list[dict],
+    fields: set[str],
+    status_format: str,
+    color: bool,
+) -> str:
+    parts = []
+    for item in items:
+        limits = item["limits"]
+        has_limits = limits["five_hour_pct"] is not None or limits["seven_day_pct"] is not None
+        segment = f"{item['name']}"
+        if has_limits:
+            if status_format == "plain":
+                segment += (
+                    f" 5h:{_fmt_pct(limits['five_hour_pct'])} "
+                    f"7d:{_fmt_pct(limits['seven_day_pct'])}"
+                )
+            else:
+                segment += (
+                    f" 5h:{render_progress(limits['five_hour_pct'], color=color)} "
+                    f"7d:{render_progress(limits['seven_day_pct'], color=color)}"
+                )
+        today = item.get("today")
+        if today and ("tokens" in fields or not has_limits):
+            segment += f" tok:{_fmt_tokens_compact(today['tokens'])}"
+        if today and ("cost" in fields or not has_limits):
+            segment += f" cost:${today['cost_usd']:.2f}"
+        parts.append(segment)
+    return " | ".join(parts) if parts else "No agents detected"
+
+
+def _show_status(agents, args: list[str]) -> None:
+    opts = _parse_status_args(args)
+    selected = agents
+    if opts["agent"]:
+        selected = [a for a in agents if a.id == opts["agent"]]
+
+    fields = opts["fields"]
+    items = [_build_status_item(a.id, fields) for a in selected]
+    print(_render_status_text(items, fields, opts["format"], use_color(opts["color"])))
 
 
 def _show_agent_dashboard(agent_id: str):
@@ -52,8 +189,7 @@ def _build_agent_data(agent_id: str, agent_name: str) -> dict | None:
     sessions = aggregate_sessions(entries)
     recent = _load_entries(agent_id, hours_back=48)
     blocks = analyze_blocks(recent)
-    rate_loaders = {"claude-code": load_claude_rate_limits, "codex": codex.load_rate_limits}
-    rate_limits = rate_loaders.get(agent_id, lambda: None)()
+    rate_limits = RATE_LIMIT_LOADERS.get(agent_id, lambda: None)()
     p90 = None
     has_limits = rate_limits and (rate_limits.five_hour_pct is not None or rate_limits.seven_day_pct is not None)
     if not has_limits:
@@ -158,10 +294,18 @@ def main():
 
     agents = detect_agents()
     if not agents:
-        console.print("[red]未检测到任何 AI Agent[/red]")
+        if command == "status":
+            print("No agents detected")
+        else:
+            console.print("[red]未检测到任何 AI Agent[/red]")
         sys.exit(1)
 
     agent_ids = {a.id for a in agents}
+
+    if command == "status":
+        _show_status(agents, args[1:])
+        return
+
     console.print(f"[dim]检测到: {', '.join(a.name + ' ✓' for a in agents)}[/dim]")
 
     # tt claude / tt codex
@@ -224,7 +368,7 @@ def main():
         render_blocks(blocks)
     else:
         console.print(f"[red]未知命令: {command}[/red]")
-        console.print("[dim]可用命令: dashboard, daily, weekly, monthly, sessions, blocks, claude, codex, setup, unsetup[/dim]")
+        console.print("[dim]可用命令: dashboard, status, daily, weekly, monthly, sessions, blocks, claude, codex, setup, unsetup[/dim]")
         sys.exit(1)
 
 

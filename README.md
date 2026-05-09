@@ -35,6 +35,11 @@ pip install token-tracker
 
 ```bash
 tt                # 交互式 Dashboard（方向键切换 Agent）
+tt status         # 单行状态输出（适合 tmux / prompt）
+tt status claude  # 仅 Claude Code 状态
+tt status codex   # 仅 Codex 状态
+tt status --format plain  # 不显示进度条的紧凑输出
+tt status --no-color  # 禁用颜色，适合 prompt / tmux
 tt claude         # 仅 Claude Code
 tt codex          # 仅 Codex
 ```
@@ -43,6 +48,12 @@ tt codex          # 仅 Codex
 
 - Python 3.12+
 - [Rich](https://github.com/Textualize/rich)（自动安装）
+
+## Roadmap
+
+- 🖥️ **桌面应用** — 基于 Tauri 的跨平台桌面版，打开即用，可视化图表 + 更多数据分析
+- 🔌 **更多 Agent 支持** — Cursor、Cline、Aider 等本地日志适配 + API 提供商用量拉取
+- 🧩 **终端集成** — 规划见 [Terminal Integrations Roadmap](docs/terminal-integrations.md)
 
 ## License
 

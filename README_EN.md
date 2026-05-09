@@ -35,6 +35,11 @@ pip install token-tracker
 
 ```bash
 tt                # interactive dashboard (arrow keys to switch agents)
+tt status         # one-line status output (for tmux / prompt)
+tt status claude  # Claude Code status only
+tt status codex   # Codex status only
+tt status --format plain  # compact output without progress bars
+tt status --no-color  # disable colors for prompt / tmux
 tt claude         # Claude Code only
 tt codex          # Codex only
 ```
