@@ -1,5 +1,5 @@
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 
 from .adapters import claude, codex
 from .adapters.rate_limits import load_rate_limits as load_claude_rate_limits
@@ -39,6 +39,7 @@ def _parse_status_args(args: list[str]) -> dict:
         "color": None,
         "fields": {"limits"},
         "format": "compact",
+        "resets": False,
     }
     i = 0
     while i < len(args):
@@ -47,6 +48,8 @@ def _parse_status_args(args: list[str]) -> dict:
             opts["color"] = True
         elif arg == "--no-color":
             opts["color"] = False
+        elif arg in ("--reset", "--resets"):
+            opts["resets"] = True
         elif arg == "--agent" and i + 1 < len(args):
             opts["agent"] = AGENT_ALIASES.get(args[i + 1], args[i + 1])
             i += 1
@@ -77,6 +80,22 @@ def _fmt_pct(value: float | None) -> str:
     if value is None:
         return "n/a"
     return f"{value:.0f}%"
+
+
+def _fmt_reset(resets_at: int | None) -> str:
+    if not resets_at:
+        return ""
+    remaining = int(resets_at - datetime.now(timezone.utc).timestamp())
+    if remaining <= 0:
+        return " reset:now"
+    days, rem = divmod(remaining, 86400)
+    hours, rem = divmod(rem, 3600)
+    minutes = rem // 60
+    if days:
+        return f" reset:{days}d{hours}h"
+    if hours:
+        return f" reset:{hours}h{minutes:02d}m"
+    return f" reset:{minutes}m"
 
 
 def _fmt_tokens_compact(value: int) -> str:
@@ -128,6 +147,7 @@ def _render_status_text(
     fields: set[str],
     status_format: str,
     color: bool,
+    show_resets: bool,
 ) -> str:
     parts = []
     for item in items:
@@ -135,15 +155,17 @@ def _render_status_text(
         has_limits = limits["five_hour_pct"] is not None or limits["seven_day_pct"] is not None
         segment = f"{item['name']}"
         if has_limits:
+            five_reset = _fmt_reset(limits["five_hour_resets_at"]) if show_resets else ""
+            seven_reset = _fmt_reset(limits["seven_day_resets_at"]) if show_resets else ""
             if status_format == "plain":
                 segment += (
-                    f" 5h:{_fmt_pct(limits['five_hour_pct'])} "
-                    f"7d:{_fmt_pct(limits['seven_day_pct'])}"
+                    f" 5h:{_fmt_pct(limits['five_hour_pct'])}{five_reset} "
+                    f"7d:{_fmt_pct(limits['seven_day_pct'])}{seven_reset}"
                 )
             else:
                 segment += (
-                    f" 5h:{render_progress(limits['five_hour_pct'], color=color)} "
-                    f"7d:{render_progress(limits['seven_day_pct'], color=color)}"
+                    f" 5h:{render_progress(limits['five_hour_pct'], color=color)}{five_reset} "
+                    f"7d:{render_progress(limits['seven_day_pct'], color=color)}{seven_reset}"
                 )
         today = item.get("today")
         if today and ("tokens" in fields or not has_limits):
@@ -162,7 +184,13 @@ def _show_status(agents, args: list[str]) -> None:
 
     fields = opts["fields"]
     items = [_build_status_item(a.id, fields) for a in selected]
-    print(_render_status_text(items, fields, opts["format"], use_color(opts["color"])))
+    print(_render_status_text(
+        items,
+        fields,
+        opts["format"],
+        use_color(opts["color"]),
+        opts["resets"],
+    ))
 
 
 def _show_agent_dashboard(agent_id: str):
@@ -294,7 +322,7 @@ def main():
 
     agents = detect_agents()
     if not agents:
-        if command == "status":
+        if command in ("status", "codex-status"):
             print("No agents detected")
         else:
             console.print("[red]未检测到任何 AI Agent[/red]")
@@ -304,6 +332,10 @@ def main():
 
     if command == "status":
         _show_status(agents, args[1:])
+        return
+
+    if command == "codex-status":
+        _show_status(agents, ["codex", "--resets"] + args[1:])
         return
 
     console.print(f"[dim]检测到: {', '.join(a.name + ' ✓' for a in agents)}[/dim]")
@@ -368,7 +400,7 @@ def main():
         render_blocks(blocks)
     else:
         console.print(f"[red]未知命令: {command}[/red]")
-        console.print("[dim]可用命令: dashboard, status, daily, weekly, monthly, sessions, blocks, claude, codex, setup, unsetup[/dim]")
+        console.print("[dim]可用命令: dashboard, status, codex-status, daily, weekly, monthly, sessions, blocks, claude, codex, setup, unsetup[/dim]")
         sys.exit(1)
 
 

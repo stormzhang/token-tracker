@@ -38,6 +38,8 @@ tt                # 交互式 Dashboard（方向键切换 Agent）
 tt status         # 单行状态输出（适合 tmux / prompt）
 tt status claude  # 仅 Claude Code 状态
 tt status codex   # 仅 Codex 状态
+tt status codex --resets  # Codex 状态 + 重置倒计时
+tt codex-status   # Codex 状态快捷命令
 tt status --format plain  # 不显示进度条的紧凑输出
 tt status --no-color  # 禁用颜色，适合 prompt / tmux
 tt claude         # 仅 Claude Code

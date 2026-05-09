@@ -26,6 +26,8 @@ tt status --agent claude
 tt status --agent codex
 tt status claude
 tt status codex
+tt status codex --resets
+tt codex-status
 tt status --fields limits,cost,tokens
 tt status --format compact
 tt status --format plain
@@ -42,6 +44,8 @@ Claude 5h:██░░░░░░ 23% 7d:█████░░░ 61% | Codex 5
 ```
 
 第一阶段不提供 JSON 输出，避免给普通用户增加不必要的选择。后续如果终端模拟器或桌面应用需要结构化数据，再单独设计稳定的机器可读接口。
+
+Codex CLI 当前没有公开的 statusLine hook。Token Tracker 不注入 Codex TUI，Codex 状态通过 `tt status codex` 或 `tt codex-status` 输出。
 
 ## 架构分层
 
