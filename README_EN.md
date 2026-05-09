@@ -42,6 +42,8 @@ tt status --format plain  # compact output without progress bars
 tt status --no-color  # disable colors for prompt / tmux
 tt claude         # Claude Code only
 tt codex          # Codex only
+tt setup          # install Claude Code statusLine hook
+tt unsetup        # uninstall hook and restore previous statusLine config
 ```
 
 ## Data Sources

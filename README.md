@@ -42,6 +42,8 @@ tt status --format plain  # 不显示进度条的紧凑输出
 tt status --no-color  # 禁用颜色，适合 prompt / tmux
 tt claude         # 仅 Claude Code
 tt codex          # 仅 Codex
+tt setup          # 安装 Claude Code statusLine hook
+tt unsetup        # 卸载 hook，并恢复安装前的 statusLine 配置
 ```
 
 ## 环境要求

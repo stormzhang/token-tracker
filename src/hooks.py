@@ -6,6 +6,8 @@ from .ui.tables import console
 
 CLAUDE_SETTINGS = os.path.expanduser("~/.claude/settings.json")
 HOOK_SCRIPT_PATH = os.path.expanduser("~/.claude/tt-statusline.py")
+BACKUP_KEY = "tokenTracker"
+PREVIOUS_STATUSLINE_KEY = "previousStatusLine"
 
 HOOK_SCRIPT = r'''#!/usr/bin/env python3
 """Token Tracker statusLine hook — captures full statusLine data from Claude Code."""
@@ -16,6 +18,17 @@ import tempfile
 from datetime import datetime, timezone
 
 STATUS_FILE = os.path.expanduser("~/.claude/tt-status.json")
+FILLED_CHAR = "█"
+EMPTY_CHAR = "░"
+BAR_WIDTH = 8
+
+
+def render_progress(value):
+    if value is None:
+        return EMPTY_CHAR * BAR_WIDTH + " n/a"
+    pct = max(0.0, min(100.0, float(value)))
+    filled = round(pct / 100 * BAR_WIDTH)
+    return FILLED_CHAR * filled + EMPTY_CHAR * (BAR_WIDTH - filled) + f" {pct:.0f}%"
 
 
 def main():
@@ -44,9 +57,9 @@ def main():
     five = rl.get("five_hour", {})
     seven = rl.get("seven_day", {})
     if five.get("used_percentage") is not None:
-        parts.append(f"5h:{five['used_percentage']:.0f}%")
+        parts.append(f"5h:{render_progress(five['used_percentage'])}")
     if seven.get("used_percentage") is not None:
-        parts.append(f"7d:{seven['used_percentage']:.0f}%")
+        parts.append(f"7d:{render_progress(seven['used_percentage'])}")
     if parts:
         print(" ".join(parts))
 
@@ -68,6 +81,12 @@ def is_setup() -> bool:
         return False
 
 
+def _is_token_tracker_statusline(status_line: dict | None) -> bool:
+    if not isinstance(status_line, dict):
+        return False
+    return "tt-statusline" in (status_line.get("command") or "")
+
+
 def setup() -> None:
     with open(HOOK_SCRIPT_PATH, "w", encoding="utf-8") as f:
         f.write(HOOK_SCRIPT)
@@ -84,7 +103,9 @@ def setup() -> None:
         cmd = existing.get("command", "")
         if "tt-statusline" not in cmd:
             console.print(f"[yellow]检测到已有 statusLine 配置: {cmd}[/yellow]")
-            console.print("[yellow]将替换为 Token Tracker hook，原配置将失效[/yellow]")
+            console.print("[yellow]将替换为 Token Tracker hook，并备份原配置用于 unsetup 恢复[/yellow]")
+            backup = settings.setdefault(BACKUP_KEY, {})
+            backup[PREVIOUS_STATUSLINE_KEY] = existing
 
     settings["statusLine"] = {
         "type": "command",
@@ -111,13 +132,25 @@ def unsetup() -> None:
             settings = json.load(f)
 
         sl = settings.get("statusLine", {})
-        if "tt-statusline" in sl.get("command", ""):
-            del settings["statusLine"]
+        if _is_token_tracker_statusline(sl):
+            backup = settings.get(BACKUP_KEY, {})
+            previous = backup.get(PREVIOUS_STATUSLINE_KEY)
+            if isinstance(previous, dict):
+                settings["statusLine"] = previous
+                console.print(f"[green]✓[/green] 已恢复安装前的 statusLine 配置")
+            else:
+                settings.pop("statusLine", None)
+                console.print(f"[green]✓[/green] 已从 settings.json 移除 statusLine 配置")
+
+            if BACKUP_KEY in settings:
+                settings[BACKUP_KEY].pop(PREVIOUS_STATUSLINE_KEY, None)
+                if not settings[BACKUP_KEY]:
+                    del settings[BACKUP_KEY]
+
             with open(CLAUDE_SETTINGS, "w", encoding="utf-8") as f:
                 json.dump(settings, f, indent=2, ensure_ascii=False)
-            console.print(f"[green]✓[/green] 已从 settings.json 移除 statusLine 配置")
         else:
-            console.print("[dim]settings.json 中无 Token Tracker 的 statusLine 配置[/dim]")
+            console.print("[dim]当前 statusLine 不是 Token Tracker，保留现有配置[/dim]")
     else:
         console.print("[dim]settings.json 不存在[/dim]")
 
