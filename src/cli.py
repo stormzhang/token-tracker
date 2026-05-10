@@ -7,7 +7,7 @@ from .adapters.registry import detect_agents
 from .analyzer.aggregator import aggregate_daily, aggregate_monthly, aggregate_sessions, aggregate_weekly
 from .analyzer.blocks import analyze_blocks, calculate_p90
 from .analyzer.cost import calculate_cost
-from .hooks import setup, unsetup
+from .hooks import is_setup, needs_update, setup, unsetup, update_hook
 from .ui.progress import render_progress, use_color
 from .ui.tables import (
     console, render_blocks, render_daily, render_dashboard,
@@ -330,6 +330,11 @@ def main():
         return
 
     console.print(f"[dim]检测到: {', '.join(a.name + ' ✓' for a in agents)}[/dim]")
+
+    if not is_setup():
+        setup(auto=True)
+    elif needs_update():
+        update_hook()
 
     # tt claude / tt codex
     if command in AGENT_ALIASES:

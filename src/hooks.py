@@ -10,6 +10,7 @@ CLAUDE_SETTINGS = os.path.expanduser("~/.claude/settings.json")
 HOOK_SCRIPT_PATH = os.path.expanduser("~/.claude/tt-statusline.py")
 CODEX_CONFIG = os.path.expanduser("~/.codex/config.toml")
 CODEX_BACKUP = os.path.expanduser("~/.codex/tt-backup.json")
+HOOK_VERSION = "1.0"
 _BACKUP_KEY = "tokenTracker"
 _PREV_SL_KEY = "previousStatusLine"
 _SL_REGEX = re.compile(r'status_line\s*=\s*\[.*?\]', re.DOTALL)
@@ -24,6 +25,7 @@ CODEX_STATUS_LINE = [
 
 HOOK_SCRIPT = r'''#!/usr/bin/env python3
 """Claude Code statusLine — 状态栏显示 + 数据持久化到 tt-status.json"""
+__version__ = "1.0"
 import json, os, sys, tempfile
 from datetime import datetime, timezone
 
@@ -142,9 +144,54 @@ def _read_codex_config() -> tuple[str, dict] | None:
         return None
 
 
+def is_setup() -> bool:
+    has_cc = os.path.isdir(os.path.dirname(CLAUDE_SETTINGS))
+    has_codex = os.path.exists(CODEX_CONFIG)
+    if not has_cc and not has_codex:
+        return False
+    if has_cc:
+        try:
+            with open(CLAUDE_SETTINGS, "r", encoding="utf-8") as f:
+                settings = json.load(f)
+            sl = settings.get("statusLine")
+            if not isinstance(sl, dict) or "tt-statusline" not in (sl.get("command") or ""):
+                return False
+        except (OSError, json.JSONDecodeError):
+            return False
+    if has_codex:
+        result = _read_codex_config()
+        if not result:
+            return False
+        _, parsed = result
+        if parsed.get("tui", {}).get("status_line") != CODEX_STATUS_LINE:
+            return False
+    return True
+
+
+def _installed_hook_version() -> str | None:
+    try:
+        with open(HOOK_SCRIPT_PATH, "r", encoding="utf-8") as f:
+            for line in f:
+                if line.startswith("__version__"):
+                    return line.split("=", 1)[1].strip().strip('"\'')
+    except OSError:
+        pass
+    return None
+
+
+def needs_update() -> bool:
+    return _installed_hook_version() != HOOK_VERSION
+
+
+def update_hook() -> None:
+    with open(HOOK_SCRIPT_PATH, "w", encoding="utf-8") as f:
+        f.write(HOOK_SCRIPT)
+    os.chmod(HOOK_SCRIPT_PATH, os.stat(HOOK_SCRIPT_PATH).st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
+
 # --- setup ---
 
-def setup() -> None:
+def setup(auto: bool = False) -> None:
     has_cc = os.path.isdir(os.path.dirname(CLAUDE_SETTINGS))
     has_codex = os.path.exists(CODEX_CONFIG)
 
@@ -152,15 +199,20 @@ def setup() -> None:
         console.print("[red]未检测到 Claude Code 或 Codex，请先安装其中之一[/red]")
         return
 
+    if auto:
+        console.print("[dim]首次使用，正在配置状态栏...[/dim]")
+
     if has_cc:
         _setup_claude()
     else:
-        console.print("[dim]未检测到 Claude Code，跳过[/dim]")
+        if not auto:
+            console.print("[dim]未检测到 Claude Code，跳过[/dim]")
 
     if has_codex:
         _setup_codex()
     else:
-        console.print("[dim]未检测到 Codex，跳过[/dim]")
+        if not auto:
+            console.print("[dim]未检测到 Codex，跳过[/dim]")
 
 
 def _setup_claude() -> None:
