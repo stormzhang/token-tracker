@@ -419,23 +419,12 @@ def render_daily(stats: list[DailyStats], agents: list[str] | None = None) -> No
     console.print()
 
 
-def render_weekly(stats: list[WeeklyStats], agents: list[str] | None = None, agent_stats: list[WeeklyStats] | None = None) -> None:
-    if not stats:
-        console.print(f"[{_S.warn}]暂无数据[/{_S.warn}]")
-        return
-
-    multi_agent = bool(agent_stats)
-    weeks = set(s.week for s in stats)
-    total_tokens = sum(s.total_tokens for s in stats)
-    total_cost = sum(s.cost_usd for s in stats)
-    total_msgs = sum(s.message_count for s in stats)
-    total_sessions = sum(s.session_count for s in stats)
-
-    _render_header(agents or ["Claude Code"], total_tokens, total_cost, total_sessions, total_msgs, len(weeks) * 7)
-    _render_agent_summaries(agent_stats or stats, multi_agent)
-
+def _render_weekly_table(stats: list[WeeklyStats], title: str | None = None) -> None:
     mode = _width_mode()
-    table = Table(box=box.SIMPLE_HEAVY, header_style="bold", padding=(0, 1), expand=True)
+    table = Table(
+        title=title, title_style="bold", box=box.SIMPLE_HEAVY,
+        header_style="bold", padding=(0, 1), expand=True,
+    )
     table.add_column("周", style=_S.token, no_wrap=True)
     if mode != "compact":
         table.add_column("Input", justify="right")
@@ -475,35 +464,49 @@ def render_weekly(stats: list[WeeklyStats], agents: list[str] | None = None, age
     if mode == "wide":
         total_row.append(_fmt_tokens(sum(s.cache_creation_tokens + s.cache_read_tokens for s in stats)))
     total_row += [
-        f"[{_S.token_bold}]{_fmt_tokens(total_tokens)}[/{_S.token_bold}]",
-        f"[{_S.cost_bold}]{_fmt_cost(total_cost)}[/{_S.cost_bold}]",
-        str(total_sessions),
-        str(total_msgs),
+        f"[{_S.token_bold}]{_fmt_tokens(sum(s.total_tokens for s in stats))}[/{_S.token_bold}]",
+        f"[{_S.cost_bold}]{_fmt_cost(sum(s.cost_usd for s in stats))}[/{_S.cost_bold}]",
+        str(sum(s.session_count for s in stats)),
+        str(sum(s.message_count for s in stats)),
     ]
     table.add_row(*total_row)
 
     console.print(table)
-    console.print()
 
 
-def render_monthly(stats: list[MonthlyStats], agents: list[str] | None = None, agent_stats: list[MonthlyStats] | None = None) -> None:
+def render_weekly(stats: list[WeeklyStats], agents: list[str] | None = None) -> None:
     if not stats:
         console.print(f"[{_S.warn}]暂无数据[/{_S.warn}]")
         return
 
-    multi_agent = bool(agent_stats)
-    months = set(s.month for s in stats)
+    multi_agent = _is_multi_agent(stats)
+    weeks = set(s.week for s in stats)
     total_tokens = sum(s.total_tokens for s in stats)
     total_cost = sum(s.cost_usd for s in stats)
     total_msgs = sum(s.message_count for s in stats)
     total_sessions = sum(s.session_count for s in stats)
-    days = len(months) * 30
 
-    _render_header(agents or ["Claude Code"], total_tokens, total_cost, total_sessions, total_msgs, days)
-    _render_agent_summaries(agent_stats or stats, multi_agent)
+    _render_header(agents or ["Claude Code"], total_tokens, total_cost, total_sessions, total_msgs, len(weeks) * 7)
 
+    if multi_agent:
+        from collections import defaultdict
+        by_agent: dict[str, list] = defaultdict(list)
+        for s in stats:
+            by_agent[s.agent_id].append(s)
+        for agent_id in sorted(by_agent):
+            _render_weekly_table(by_agent[agent_id], title=AGENT_LABEL.get(agent_id, agent_id))
+    else:
+        _render_weekly_table(stats)
+
+    console.print()
+
+
+def _render_monthly_table(stats: list[MonthlyStats], title: str | None = None) -> None:
     mode = _width_mode()
-    table = Table(box=box.SIMPLE_HEAVY, header_style="bold", padding=(0, 1), expand=True)
+    table = Table(
+        title=title, title_style="bold", box=box.SIMPLE_HEAVY,
+        header_style="bold", padding=(0, 1), expand=True,
+    )
     table.add_column("月份", style=_S.token, no_wrap=True)
     if mode != "compact":
         table.add_column("Input", justify="right")
@@ -543,14 +546,40 @@ def render_monthly(stats: list[MonthlyStats], agents: list[str] | None = None, a
             _fmt_tokens(sum(s.cache_read_tokens for s in stats)),
         ]
     total_row += [
-        f"[{_S.token_bold}]{_fmt_tokens(total_tokens)}[/{_S.token_bold}]",
-        f"[{_S.cost_bold}]{_fmt_cost(total_cost)}[/{_S.cost_bold}]",
-        str(total_sessions),
-        str(total_msgs),
+        f"[{_S.token_bold}]{_fmt_tokens(sum(s.total_tokens for s in stats))}[/{_S.token_bold}]",
+        f"[{_S.cost_bold}]{_fmt_cost(sum(s.cost_usd for s in stats))}[/{_S.cost_bold}]",
+        str(sum(s.session_count for s in stats)),
+        str(sum(s.message_count for s in stats)),
     ]
     table.add_row(*total_row)
 
     console.print(table)
+
+
+def render_monthly(stats: list[MonthlyStats], agents: list[str] | None = None) -> None:
+    if not stats:
+        console.print(f"[{_S.warn}]暂无数据[/{_S.warn}]")
+        return
+
+    multi_agent = _is_multi_agent(stats)
+    months = set(s.month for s in stats)
+    total_tokens = sum(s.total_tokens for s in stats)
+    total_cost = sum(s.cost_usd for s in stats)
+    total_msgs = sum(s.message_count for s in stats)
+    total_sessions = sum(s.session_count for s in stats)
+    days = len(months) * 30
+
+    _render_header(agents or ["Claude Code"], total_tokens, total_cost, total_sessions, total_msgs, days)
+
+    if multi_agent:
+        from collections import defaultdict
+        by_agent: dict[str, list] = defaultdict(list)
+        for s in stats:
+            by_agent[s.agent_id].append(s)
+        for agent_id in sorted(by_agent):
+            _render_monthly_table(by_agent[agent_id], title=AGENT_LABEL.get(agent_id, agent_id))
+    else:
+        _render_monthly_table(stats)
 
     if len(stats) > 1:
         console.print()
