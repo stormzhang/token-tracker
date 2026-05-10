@@ -21,6 +21,13 @@ def _load_entries(agent_id: str, hours_back: int = 0):
     return loader.load_entries(hours_back=hours_back) if loader else []
 
 
+def _load_all_entries(agents):
+    entries = []
+    for a in agents:
+        entries.extend(_load_entries(a.id))
+    return entries
+
+
 def _aggregate_per_agent(agents, agg_fn):
     stats = []
     for a in agents:
@@ -194,13 +201,17 @@ def main():
         stats.sort(key=lambda s: s.total_tokens, reverse=True)
         render_daily(stats, agents=agent_names)
     elif command == "weekly":
-        stats = _aggregate_per_agent(agents, aggregate_weekly)
-        stats.sort(key=lambda s: (s.week, s.agent_id), reverse=True)
-        render_weekly(stats, agents=agent_names)
+        all_entries = _load_all_entries(agents)
+        stats = aggregate_weekly(all_entries)
+        stats.sort(key=lambda s: s.week, reverse=True)
+        agent_stats = _aggregate_per_agent(agents, aggregate_weekly) if len(agents) > 1 else []
+        render_weekly(stats, agents=agent_names, agent_stats=agent_stats)
     elif command == "monthly":
-        stats = _aggregate_per_agent(agents, aggregate_monthly)
-        stats.sort(key=lambda s: (s.month, s.agent_id))
-        render_monthly(stats, agents=agent_names)
+        all_entries = _load_all_entries(agents)
+        stats = aggregate_monthly(all_entries)
+        stats.sort(key=lambda s: s.month)
+        agent_stats = _aggregate_per_agent(agents, aggregate_monthly) if len(agents) > 1 else []
+        render_monthly(stats, agents=agent_names, agent_stats=agent_stats)
     elif command == "sessions":
         limit = 20
         if len(args) > 1:
