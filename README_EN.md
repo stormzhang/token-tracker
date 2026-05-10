@@ -14,21 +14,21 @@ Custom StatusLine integration + CLI Dashboard — see token usage, cost, and rat
 
 **Claude Code**: project, 5h/7d quota progress bars, CTX window usage, token counts, model
 
-![Claude Code StatusLine](screenshot-statusline-cc.png)
+![Claude Code StatusLine](assets/screenshot-statusline-cc.png)
 
 **Codex**: project, 5h/weekly quota, context remaining, model
 
-![Codex StatusLine](screenshot-statusline-codex.png)
+![Codex StatusLine](assets/screenshot-statusline-codex.png)
 
 ## Dashboard & Daily / Weekly / Monthly Reports
 
-![Token Tracker Dashboard](screenshot.png)
+![Token Tracker Dashboard](assets/screenshot.png)
 
-![Token Tracker Daily](screenshot-daily.png)
+![Token Tracker Daily](assets/screenshot-daily.png)
 
-![Token Tracker Weekly](screenshot-weekly.png)
+![Token Tracker Weekly](assets/screenshot-weekly.png)
 
-![Token Tracker Monthly](screenshot-monthly.png)
+![Token Tracker Monthly](assets/screenshot-monthly.png)
 
 ## Features
 

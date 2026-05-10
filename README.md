@@ -14,21 +14,21 @@
 
 **Claude Code**：项目名、5h/7d 配额进度条、CTX 窗口占比、Token 用量、模型名
 
-![Claude Code StatusLine](screenshot-statusline-cc.png)
+![Claude Code StatusLine](assets/screenshot-statusline-cc.png)
 
 **Codex**：项目名、5h/7d 配额、上下文剩余、模型名
 
-![Codex StatusLine](screenshot-statusline-codex.png)
+![Codex StatusLine](assets/screenshot-statusline-codex.png)
 
 ## Dashboard 数据面板和 日/周/月 数据报表分析
 
-![Token Tracker Dashboard](screenshot.png)
+![Token Tracker Dashboard](assets/screenshot.png)
 
-![Token Tracker Daily](screenshot-daily.png)
+![Token Tracker Daily](assets/screenshot-daily.png)
 
-![Token Tracker Weekly](screenshot-weekly.png)
+![Token Tracker Weekly](assets/screenshot-weekly.png)
 
-![Token Tracker Monthly](screenshot-monthly.png)
+![Token Tracker Monthly](assets/screenshot-monthly.png)
 
 ## 功能
 

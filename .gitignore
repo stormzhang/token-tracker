@@ -17,5 +17,4 @@ Thumbs.db
 AGENTS.md
 CLAUDE.md
 pricing_cache.json
-install-statusline.sh
-tt-statusline.py
+docs/
