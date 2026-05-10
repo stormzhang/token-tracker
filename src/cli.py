@@ -7,7 +7,7 @@ from .adapters.registry import detect_agents
 from .analyzer.aggregator import aggregate_daily, aggregate_monthly, aggregate_sessions, aggregate_weekly
 from .analyzer.blocks import analyze_blocks, calculate_p90
 from .analyzer.cost import calculate_cost
-from .hooks import is_setup, setup, unsetup
+from .hooks import setup, unsetup
 from .ui.progress import render_progress, use_color
 from .ui.tables import (
     console, render_blocks, render_daily, render_dashboard,

@@ -34,47 +34,40 @@ src/
 ## 命令
 
 ```bash
-python -m src.cli                # 交互式 dashboard（多 Agent 时左右切换）
-python -m src.cli claude         # Claude Code dashboard
-python -m src.cli codex          # Codex dashboard
-python -m src.cli daily
-python -m src.cli weekly
-python -m src.cli monthly
-python -m src.cli sessions
-python -m src.cli blocks
+tt setup                         # 配置 Claude Code + Codex 状态栏
+tt unsetup                       # 卸载并恢复原始配置
+tt                               # 交互式 dashboard（多 Agent 时左右切换）
+tt claude                        # Claude Code dashboard
+tt codex                         # Codex dashboard
+tt status                        # 单行状态输出
+tt daily / weekly / monthly      # 按时间维度汇总
+tt sessions                      # 会话明细
+tt blocks                        # 5h 计费块
 ```
 
-## statusLine Hook
+## statusLine 管理
 
-脚本路径：`~/.claude/tt-statusline.py`，通过 `tt setup` 安装，`tt unsetup` 卸载恢复。
+`tt setup` 一键配置 Claude Code 和 Codex 的状态栏，`tt unsetup` 卸载并恢复原始配置。自动检测已安装的 Agent，未安装的跳过。
 
 ### 设计原则
 
-- **不自动安装**：`tt` / `tt claude` 等查看命令不会触发 setup，避免覆盖用户已有的 statusLine
-- **统一命名**：脚本固定为 `tt-statusline.py`，品牌统一
-- **双重职责**：一个脚本同时完成状态栏渲染 + 数据持久化
-- **备份恢复**：安装时备份用户原有 statusLine 配置，卸载时自动恢复
+- **不自动安装**：`tt` / `tt claude` 等查看命令不触发 setup
+- **备份恢复**：安装时备份原有配置，卸载时自动恢复
 
-### 数据流
+### Claude Code
 
-Claude Code stdin → tt-statusline.py → stdout（状态栏显示）+ tt-status.json（持久化供 dashboard 读取）
+- 脚本：`~/.claude/tt-statusline.py`（渲染状态栏 + 持久化数据）
+- 数据流：Claude Code stdin → tt-statusline.py → stdout（状态栏）+ tt-status.json（供 dashboard 读取）
+- 原有 statusLine 备份到 `settings.json` 的 `tokenTracker.previousStatusLine`
 
-### 状态栏显示内容（按顺序）
+**状态栏内容**：项目名 → 5h/7d 进度条（订阅制）或 Cost（API 模式）→ CTX 窗口 → Token 用量 → 模型名
+**进度条颜色**：绿色（< 50%）→ 黄色（50-80%）→ 红色（> 80%）
 
-- 项目名（`workspace.project_dir` 最后一级目录）
-- 订阅制：5h/7d 限额进度条（`rate_limits.*.used_percentage`）
-- API 模式（无 rate_limits）：会话累计费用（`cost.total_cost_usd`）
-- 上下文窗口（`context_window.context_window_size` + `used_percentage`）
-- Token 用量（input↑ output↓ cached）
-- 模型名 + effort level
+### Codex
 
-### 进度条颜色
-
-绿色（< 50%）→ 黄色（50-80%）→ 红色（> 80%）
-
-### stdin 可用字段
-
-session_id, transcript_path, cwd, session_name, model, workspace, version, output_style, cost（total_cost_usd/duration/lines_added/lines_removed）, context_window（used_percentage/token 明细）, exceeds_200k_tokens, fast_mode, effort, thinking, rate_limits
+- 配置：写入 `~/.codex/config.toml` 的 `[tui].status_line` 预设项
+- 预设项：project, five-hour-limit, weekly-limit, context-remaining, model-with-reasoning
+- 原有配置备份到 `~/.codex/tt-backup.json`
 
 ## 数据源
 
