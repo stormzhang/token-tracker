@@ -7,7 +7,7 @@ from .analyzer.aggregator import aggregate_daily, aggregate_monthly, aggregate_s
 from .analyzer.blocks import analyze_blocks, calculate_p90
 from .hooks import is_setup, needs_update, setup, unsetup, update_hook
 from .ui.tables import (
-    console, render_blocks, render_daily, render_dashboard,
+    console, render_daily, render_dashboard,
     render_monthly, render_sessions, render_tab_bar, render_weekly,
 )
 
@@ -223,19 +223,9 @@ def main():
         stats = _aggregate_per_agent(aggregate_sessions)
         stats.sort(key=lambda s: s.start_time, reverse=True)
         render_sessions(stats, limit)
-    elif command == "blocks":
-        hours = 48
-        if len(args) > 1:
-            try:
-                hours = int(args[1])
-            except ValueError:
-                pass
-        recent = _load_all_entries(hours_back=hours)
-        blocks = analyze_blocks(recent)
-        render_blocks(blocks)
     else:
         console.print(f"[red]未知命令: {command}[/red]")
-        console.print("[dim]可用命令: dashboard, daily, weekly, monthly, sessions, blocks, claude, codex, setup, unsetup[/dim]")
+        console.print("[dim]可用命令: dashboard, daily, weekly, monthly, sessions, claude, codex, setup, unsetup[/dim]")
         sys.exit(1)
 
 
