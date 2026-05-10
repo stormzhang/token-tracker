@@ -187,19 +187,31 @@ def main():
 
     # 其他命令使用合并数据
     agent_names = [a.name for a in agents]
-    entries = _load_all_entries()
-    if not entries:
+    all_entries = _load_all_entries()
+    if not all_entries:
         console.print("[yellow]暂无 token 使用数据[/yellow]")
         sys.exit(0)
 
+    def _aggregate_per_agent(agg_fn):
+        stats = []
+        for a in agents:
+            entries = _load_entries(a.id)
+            for s in agg_fn(entries):
+                s.agent_id = a.id
+                stats.append(s)
+        return stats
+
     if command == "daily":
-        stats = aggregate_daily(entries)
+        stats = _aggregate_per_agent(aggregate_daily)
+        stats.sort(key=lambda s: (s.date, s.agent_id))
         render_daily(stats, agents=agent_names)
     elif command == "weekly":
-        stats = aggregate_weekly(entries)
+        stats = _aggregate_per_agent(aggregate_weekly)
+        stats.sort(key=lambda s: (s.week, s.agent_id))
         render_weekly(stats, agents=agent_names)
     elif command == "monthly":
-        stats = aggregate_monthly(entries)
+        stats = _aggregate_per_agent(aggregate_monthly)
+        stats.sort(key=lambda s: (s.month, s.agent_id))
         render_monthly(stats, agents=agent_names)
     elif command == "sessions":
         limit = 20
@@ -208,7 +220,8 @@ def main():
                 limit = int(args[1])
             except ValueError:
                 pass
-        stats = aggregate_sessions(entries)
+        stats = _aggregate_per_agent(aggregate_sessions)
+        stats.sort(key=lambda s: s.start_time, reverse=True)
         render_sessions(stats, limit)
     elif command == "blocks":
         hours = 48

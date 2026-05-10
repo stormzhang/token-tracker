@@ -47,6 +47,7 @@ class DailyStats:
     session_count: int = 0
     message_count: int = 0
     models: dict[str, int] = field(default_factory=dict)
+    agent_id: str = ""
 
 
 @dataclass
@@ -63,6 +64,7 @@ class WeeklyStats:
     session_count: int = 0
     message_count: int = 0
     models: dict[str, int] = field(default_factory=dict)
+    agent_id: str = ""
 
 
 @dataclass
@@ -80,6 +82,7 @@ class SessionStats:
     total_tokens: int = 0
     cost_usd: float = 0.0
     message_count: int = 0
+    agent_id: str = ""
 
 
 @dataclass
@@ -94,6 +97,7 @@ class MonthlyStats:
     session_count: int = 0
     message_count: int = 0
     models: dict[str, int] = field(default_factory=dict)
+    agent_id: str = ""
 
 
 @dataclass

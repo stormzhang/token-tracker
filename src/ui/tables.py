@@ -54,6 +54,10 @@ def _width_mode() -> str:
     return "wide"
 
 
+AGENT_SHORT = {"claude-code": "CC", "codex": "Codex"}
+AGENT_LABEL = {"claude-code": "Claude Code", "codex": "Codex"}
+
+
 MODEL_SHORT = {
     "claude-opus-4-6": "Opus 4.6",
     "claude-opus-4-7": "Opus 4.7",
@@ -207,6 +211,36 @@ def _render_header(agents: list[str], total_tokens: int, total_cost: float,
     console.print(lines)
 
 
+def _render_agent_summaries(stats_list, multi_agent: bool) -> None:
+    if not multi_agent:
+        return
+    from collections import defaultdict
+    by_agent: dict[str, dict] = defaultdict(lambda: {"tokens": 0, "cost": 0.0, "sessions": 0, "messages": 0})
+    for s in stats_list:
+        if not s.agent_id:
+            continue
+        a = by_agent[s.agent_id]
+        a["tokens"] += s.total_tokens
+        a["cost"] += s.cost_usd
+        a["sessions"] += s.session_count
+        a["messages"] += s.message_count
+    if len(by_agent) < 2:
+        return
+    for agent_id, d in sorted(by_agent.items()):
+        lines = Text()
+        label = AGENT_LABEL.get(agent_id, agent_id)
+        lines.append(f"{label}", style="bold")
+        lines.append(f"  Token: ", style=_S.dim)
+        lines.append(f"{_fmt_tokens(d['tokens'])}", style=_S.token_bold)
+        lines.append(f"  等效成本: ", style=_S.dim)
+        lines.append(f"{_fmt_cost(d['cost'])}", style=_S.cost_bold)
+        lines.append(f"  会话: ", style=_S.dim)
+        lines.append(f"{d['sessions']}", style="bold")
+        lines.append(f"  消息: ", style=_S.dim)
+        lines.append(f"{d['messages']}", style="bold")
+        console.print(lines)
+
+
 def render_dashboard(
     daily_stats: list[DailyStats],
     weekly_stats: list[WeeklyStats],
@@ -326,16 +360,21 @@ def render_daily(stats: list[DailyStats], agents: list[str] | None = None) -> No
         console.print(f"[{_S.warn}]暂无数据[/{_S.warn}]")
         return
 
+    multi_agent = len(set(s.agent_id for s in stats if s.agent_id)) > 1
+    dates = set(s.date for s in stats)
     total_tokens = sum(s.total_tokens for s in stats)
     total_cost = sum(s.cost_usd for s in stats)
     total_msgs = sum(s.message_count for s in stats)
     total_sessions = sum(s.session_count for s in stats)
 
-    _render_header(agents or ["Claude Code"], total_tokens, total_cost, total_sessions, total_msgs, len(stats))
+    _render_header(agents or ["Claude Code"], total_tokens, total_cost, total_sessions, total_msgs, len(dates))
+    _render_agent_summaries(stats, multi_agent)
 
     mode = _width_mode()
     table = Table(box=box.SIMPLE_HEAVY, header_style="bold", padding=(0, 1), expand=True)
     table.add_column("日期", style=_S.token, no_wrap=True)
+    if multi_agent:
+        table.add_column("来源", no_wrap=True)
     if mode != "compact":
         table.add_column("Input", justify="right")
         table.add_column("Output", justify="right")
@@ -351,6 +390,8 @@ def render_daily(stats: list[DailyStats], agents: list[str] | None = None) -> No
     for s in stats:
         cache_total = s.cache_creation_tokens + s.cache_read_tokens
         row: list = [s.date]
+        if multi_agent:
+            row.append(AGENT_SHORT.get(s.agent_id, s.agent_id))
         if mode != "compact":
             row += [_fmt_tokens(s.input_tokens), _fmt_tokens(s.output_tokens)]
         if mode == "wide":
@@ -372,16 +413,21 @@ def render_weekly(stats: list[WeeklyStats], agents: list[str] | None = None) -> 
         console.print(f"[{_S.warn}]暂无数据[/{_S.warn}]")
         return
 
+    multi_agent = len(set(s.agent_id for s in stats if s.agent_id)) > 1
+    weeks = set(s.week for s in stats)
     total_tokens = sum(s.total_tokens for s in stats)
     total_cost = sum(s.cost_usd for s in stats)
     total_msgs = sum(s.message_count for s in stats)
     total_sessions = sum(s.session_count for s in stats)
 
-    _render_header(agents or ["Claude Code"], total_tokens, total_cost, total_sessions, total_msgs, len(stats) * 7)
+    _render_header(agents or ["Claude Code"], total_tokens, total_cost, total_sessions, total_msgs, len(weeks) * 7)
+    _render_agent_summaries(stats, multi_agent)
 
     mode = _width_mode()
     table = Table(box=box.SIMPLE_HEAVY, header_style="bold", padding=(0, 1), expand=True)
     table.add_column("周", style=_S.token, no_wrap=True)
+    if multi_agent:
+        table.add_column("来源", no_wrap=True)
     if mode != "compact":
         table.add_column("Input", justify="right")
         table.add_column("Output", justify="right")
@@ -398,6 +444,8 @@ def render_weekly(stats: list[WeeklyStats], agents: list[str] | None = None) -> 
         cache_total = s.cache_creation_tokens + s.cache_read_tokens
         week_label = f"{s.week_start} ~ {s.week_end}"
         row: list = [week_label]
+        if multi_agent:
+            row.append(AGENT_SHORT.get(s.agent_id, s.agent_id))
         if mode != "compact":
             row += [_fmt_tokens(s.input_tokens), _fmt_tokens(s.output_tokens)]
         if mode == "wide":
@@ -412,6 +460,8 @@ def render_weekly(stats: list[WeeklyStats], agents: list[str] | None = None) -> 
 
     table.add_section()
     total_row: list = ["[bold]合计[/bold]"]
+    if multi_agent:
+        total_row.append("")
     if mode != "compact":
         total_row += [
             _fmt_tokens(sum(s.input_tokens for s in stats)),
@@ -436,17 +486,22 @@ def render_monthly(stats: list[MonthlyStats], agents: list[str] | None = None) -
         console.print(f"[{_S.warn}]暂无数据[/{_S.warn}]")
         return
 
+    multi_agent = len(set(s.agent_id for s in stats if s.agent_id)) > 1
+    months = set(s.month for s in stats)
     total_tokens = sum(s.total_tokens for s in stats)
     total_cost = sum(s.cost_usd for s in stats)
     total_msgs = sum(s.message_count for s in stats)
     total_sessions = sum(s.session_count for s in stats)
-    days = len(set(s.month for s in stats)) * 30
+    days = len(months) * 30
 
     _render_header(agents or ["Claude Code"], total_tokens, total_cost, total_sessions, total_msgs, days)
+    _render_agent_summaries(stats, multi_agent)
 
     mode = _width_mode()
     table = Table(box=box.SIMPLE_HEAVY, header_style="bold", padding=(0, 1), expand=True)
     table.add_column("月份", style=_S.token, no_wrap=True)
+    if multi_agent:
+        table.add_column("来源", no_wrap=True)
     if mode != "compact":
         table.add_column("Input", justify="right")
         table.add_column("Output", justify="right")
@@ -460,6 +515,8 @@ def render_monthly(stats: list[MonthlyStats], agents: list[str] | None = None) -
 
     for s in stats:
         row: list = [s.month]
+        if multi_agent:
+            row.append(AGENT_SHORT.get(s.agent_id, s.agent_id))
         if mode != "compact":
             row += [_fmt_tokens(s.input_tokens), _fmt_tokens(s.output_tokens)]
         if mode == "wide":
@@ -474,6 +531,8 @@ def render_monthly(stats: list[MonthlyStats], agents: list[str] | None = None) -
 
     table.add_section()
     total_row: list = ["[bold]合计[/bold]"]
+    if multi_agent:
+        total_row.append("")
     if mode != "compact":
         total_row += [
             _fmt_tokens(sum(s.input_tokens for s in stats)),
@@ -552,6 +611,7 @@ def render_sessions(stats: list[SessionStats], limit: int = 20) -> None:
         console.print(f"[{_S.warn}]暂无数据[/{_S.warn}]")
         return
 
+    multi_agent = len(set(s.agent_id for s in stats if s.agent_id)) > 1
     shown = stats[:limit]
     total_tokens = sum(s.total_tokens for s in shown)
     total_cost = sum(s.cost_usd for s in shown)
@@ -568,6 +628,8 @@ def render_sessions(stats: list[SessionStats], limit: int = 20) -> None:
     mode = _width_mode()
     table = Table(box=box.SIMPLE_HEAVY, header_style="bold", padding=(0, 1))
     table.add_column("时间", style=_S.token, no_wrap=True)
+    if multi_agent:
+        table.add_column("来源", no_wrap=True)
     table.add_column("项目", no_wrap=True, max_width=14)
     if mode != "compact":
         table.add_column("模型", style=_S.cost, no_wrap=True)
@@ -582,7 +644,10 @@ def render_sessions(stats: list[SessionStats], limit: int = 20) -> None:
     max_tokens = max(s.total_tokens for s in shown) if shown else 1
 
     for s in shown:
-        row: list = [s.start_time.strftime("%m-%d %H:%M"), _project_short(s.project)]
+        row: list = [s.start_time.strftime("%m-%d %H:%M")]
+        if multi_agent:
+            row.append(AGENT_SHORT.get(s.agent_id, s.agent_id))
+        row.append(_project_short(s.project))
         if mode != "compact":
             row += [_model_short(s.model), _fmt_duration(s.duration_minutes)]
         if mode == "wide":
