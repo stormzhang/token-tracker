@@ -5,16 +5,16 @@ import stat
 from .ui.tables import console
 
 CLAUDE_SETTINGS = os.path.expanduser("~/.claude/settings.json")
-HOOK_SCRIPT_PATH = os.path.expanduser("~/.claude/my-statusline.py")
+HOOK_SCRIPT_PATH = os.path.expanduser("~/.claude/tt-statusline.py")
 BACKUP_KEY = "tokenTracker"
 PREVIOUS_STATUSLINE_KEY = "previousStatusLine"
 
 HOOK_SCRIPT = r'''#!/usr/bin/env python3
-"""Claude Code statusLine — 状态栏显示 + 数据持久化到 cc-status.json"""
+"""Claude Code statusLine — 状态栏显示 + 数据持久化到 tt-status.json"""
 import json, os, sys, tempfile
 from datetime import datetime, timezone
 
-STATUS_FILE = os.path.expanduser("~/.claude/cc-status.json")
+STATUS_FILE = os.path.expanduser("~/.claude/tt-status.json")
 BAR = ("█", "░", 8)
 C = {
     "green": "\033[32m", "yellow": "\033[33m", "red": "\033[31m",
@@ -120,7 +120,7 @@ def is_setup() -> bool:
         with open(CLAUDE_SETTINGS, "r", encoding="utf-8") as f:
             settings = json.load(f)
         cmd = settings.get("statusLine", {}).get("command", "")
-        return "my-statusline" in cmd and os.path.exists(HOOK_SCRIPT_PATH)
+        return "tt-statusline" in cmd and os.path.exists(HOOK_SCRIPT_PATH)
     except (json.JSONDecodeError, OSError):
         return False
 
@@ -128,7 +128,7 @@ def is_setup() -> bool:
 def _is_token_tracker_statusline(status_line: dict | None) -> bool:
     if not isinstance(status_line, dict):
         return False
-    return "my-statusline" in (status_line.get("command") or "")
+    return "tt-statusline" in (status_line.get("command") or "")
 
 
 def setup() -> None:
@@ -145,7 +145,7 @@ def setup() -> None:
     existing = settings.get("statusLine")
     if existing:
         cmd = existing.get("command", "")
-        if "my-statusline" not in cmd:
+        if "tt-statusline" not in cmd:
             console.print(f"[yellow]检测到已有 statusLine 配置: {cmd}[/yellow]")
             console.print("[yellow]将替换为 statusLine hook，并备份原配置用于 unsetup 恢复[/yellow]")
             backup = settings.setdefault(BACKUP_KEY, {})
@@ -163,7 +163,7 @@ def setup() -> None:
     console.print(f"[green]✓[/green] 已注册到: {CLAUDE_SETTINGS}")
     console.print()
     console.print("[dim]重启 Claude Code 后生效，statusLine 数据将自动采集到:[/dim]")
-    console.print(f"[dim]  ~/.claude/cc-status.json[/dim]")
+    console.print(f"[dim]  ~/.claude/tt-status.json[/dim]")
 
 
 def unsetup() -> None:
@@ -194,11 +194,11 @@ def unsetup() -> None:
             with open(CLAUDE_SETTINGS, "w", encoding="utf-8") as f:
                 json.dump(settings, f, indent=2, ensure_ascii=False)
         else:
-            console.print("[dim]当前 statusLine 不是 my-statusline，保留现有配置[/dim]")
+            console.print("[dim]当前 statusLine 不是 tt-statusline，保留现有配置[/dim]")
     else:
         console.print("[dim]settings.json 不存在[/dim]")
 
-    status_file = os.path.expanduser("~/.claude/cc-status.json")
+    status_file = os.path.expanduser("~/.claude/tt-status.json")
     if os.path.exists(status_file):
         os.remove(status_file)
         console.print(f"[green]✓[/green] 已删除缓存: {status_file}")

@@ -21,7 +21,7 @@ src/
 │   ├── types.py        # 统一数据模型
 │   ├── claude.py       # Claude Code JSONL 解析
 │   ├── codex.py        # Codex JSONL + SQLite 解析
-│   ├── rate_limits.py  # Claude Code rate limits（cc-status.json）
+│   ├── rate_limits.py  # Claude Code rate limits（tt-status.json）
 │   └── registry.py     # Agent 自动探测
 ├── analyzer/           # 数据分析
 │   ├── aggregator.py   # 按日/月/会话/块聚合
@@ -57,7 +57,7 @@ python -m src.cli blocks
 
 ### 数据流
 
-Claude Code stdin → tt-statusline.py → stdout（状态栏显示）+ cc-status.json（持久化供 dashboard 读取）
+Claude Code stdin → tt-statusline.py → stdout（状态栏显示）+ tt-status.json（持久化供 dashboard 读取）
 
 ### 状态栏显示内容（按顺序）
 
@@ -80,7 +80,7 @@ session_id, transcript_path, cwd, session_name, model, workspace, version, outpu
 
 | Agent | 路径 | 格式 | 备注 |
 |-------|------|------|------|
-| Claude Code | `~/.claude/projects/*/` | JSONL（每条 assistant 消息一个 usage） | rate limits 从 `~/.claude/cc-status.json` 读取 |
+| Claude Code | `~/.claude/projects/*/` | JSONL（每条 assistant 消息一个 usage） | rate limits 从 `~/.claude/tt-status.json` 读取 |
 | Codex | `~/.codex/sessions/` | JSONL（`total_token_usage` 为会话累计值） | 模型从 `state_5.sqlite` threads 表获取 |
 
 ### Codex 注意事项
