@@ -114,3 +114,7 @@ tt blocks                        # 5h 计费块
 - 本地日志适配器：为 Cursor、Cline、Aider 等写适配器，数据粒度细（到会话级）
 - API 提供商 Usage API：用户配置 API Key，从 OpenAI、DeepSeek、阿里云等拉取用量，覆盖所有使用该 Key 的 Agent
 - 两者结合：有本地日志的走适配器，自有 API Key 的走 Usage API
+
+## Git 配置
+
+- commit 邮箱使用 GitHub no-reply 地址，确保 commit 正确关联账号
