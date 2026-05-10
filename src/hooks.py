@@ -10,11 +10,11 @@ BACKUP_KEY = "tokenTracker"
 PREVIOUS_STATUSLINE_KEY = "previousStatusLine"
 
 HOOK_SCRIPT = r'''#!/usr/bin/env python3
-"""Claude Code statusLine — 状态栏显示 + 数据持久化到 tt-status.json"""
+"""Claude Code statusLine — 状态栏显示 + 数据持久化到 cc-status.json"""
 import json, os, sys, tempfile
 from datetime import datetime, timezone
 
-STATUS_FILE = os.path.expanduser("~/.claude/tt-status.json")
+STATUS_FILE = os.path.expanduser("~/.claude/cc-status.json")
 BAR = ("█", "░", 8)
 C = {
     "green": "\033[32m", "yellow": "\033[33m", "red": "\033[31m",
@@ -61,10 +61,18 @@ def render(data):
         parts.append(f"{C['cyan']}{os.path.basename(project)}{C['reset']}")
 
     rl = data.get("rate_limits", {})
+    has_rl = False
     for key, label in [("five_hour", "5h"), ("seven_day", "7d")]:
         pct = rl.get(key, {}).get("used_percentage")
         if pct is not None:
+            has_rl = True
             parts.append(f"{C['blue']}{label}:{C['reset']}{progress_bar(pct)}")
+
+    if not has_rl:
+        cost = data.get("cost", {})
+        usd = cost.get("total_cost_usd")
+        if usd is not None:
+            parts.append(f"{C['blue']}Cost:{C['reset']}{C['peach']}${usd:.2f}{C['reset']}")
 
     ctx = data.get("context_window", {})
     if ctx.get("used_percentage") is not None:
@@ -75,7 +83,7 @@ def render(data):
     total_out = ctx.get("total_output_tokens", 0)
     cache = ctx.get("current_usage", {}).get("cache_read_input_tokens", 0)
     if total_in or total_out:
-        parts.append(f"{C['peach']}Tokens: {fmt_tokens(total_in)}↑ {fmt_tokens(total_out)}↓ cache:{fmt_tokens(cache)}{C['reset']}")
+        parts.append(f"{C['peach']}Tokens: {fmt_tokens(total_in)}↑ {fmt_tokens(total_out)}↓ cached:{fmt_tokens(cache)}{C['reset']}")
 
     model_name = data.get("model", {}).get("display_name", "")
     if model_name:
@@ -155,7 +163,7 @@ def setup() -> None:
     console.print(f"[green]✓[/green] 已注册到: {CLAUDE_SETTINGS}")
     console.print()
     console.print("[dim]重启 Claude Code 后生效，statusLine 数据将自动采集到:[/dim]")
-    console.print(f"[dim]  ~/.claude/tt-status.json[/dim]")
+    console.print(f"[dim]  ~/.claude/cc-status.json[/dim]")
 
 
 def unsetup() -> None:
@@ -190,7 +198,7 @@ def unsetup() -> None:
     else:
         console.print("[dim]settings.json 不存在[/dim]")
 
-    status_file = os.path.expanduser("~/.claude/tt-status.json")
+    status_file = os.path.expanduser("~/.claude/cc-status.json")
     if os.path.exists(status_file):
         os.remove(status_file)
         console.print(f"[green]✓[/green] 已删除缓存: {status_file}")

@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 from .types import RateLimits
 
-STATUS_FILE = os.path.expanduser("~/.claude/tt-status.json")
+STATUS_FILE = os.path.expanduser("~/.claude/cc-status.json")
 
 
 def load_rate_limits() -> RateLimits | None:

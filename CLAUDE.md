@@ -21,7 +21,7 @@ src/
 │   ├── types.py        # 统一数据模型
 │   ├── claude.py       # Claude Code JSONL 解析
 │   ├── codex.py        # Codex JSONL + SQLite 解析
-│   ├── rate_limits.py  # Claude Code rate limits（tt-status.json）
+│   ├── rate_limits.py  # Claude Code rate limits（cc-status.json）
 │   └── registry.py     # Agent 自动探测
 ├── analyzer/           # 数据分析
 │   ├── aggregator.py   # 按日/月/会话/块聚合
@@ -46,26 +46,41 @@ python -m src.cli blocks
 
 ## statusLine Hook
 
-通过 Claude Code 的 statusLine 机制，注册 `~/.claude/my-statusline.py` 为自定义命令。Claude Code 每次更新状态时通过 stdin 推送 JSON，脚本一方面格式化输出到 stdout 供 Claude Code 显示状态栏，一方面将完整数据写入 `~/.claude/tt-status.json` 供 token-tracker CLI 读取。
+脚本路径：`~/.claude/tt-statusline.py`，通过 `tt setup` 安装，`tt unsetup` 卸载恢复。
 
-**数据流**：Claude Code stdin → my-statusline.py → stdout（状态栏显示）+ tt-status.json（持久化）
+### 设计原则
 
-**状态栏显示内容**（按顺序）：
+- **不自动安装**：`tt` / `tt claude` 等查看命令不会触发 setup，避免覆盖用户已有的 statusLine
+- **统一命名**：脚本固定为 `tt-statusline.py`，品牌统一
+- **双重职责**：一个脚本同时完成状态栏渲染 + 数据持久化
+- **备份恢复**：安装时备份用户原有 statusLine 配置，卸载时自动恢复
+
+### 数据流
+
+Claude Code stdin → tt-statusline.py → stdout（状态栏显示）+ cc-status.json（持久化供 dashboard 读取）
+
+### 状态栏显示内容（按顺序）
+
 - 项目名（`workspace.project_dir` 最后一级目录）
-- 上下文进度（`context_window.used_percentage`，带颜色进度条）
-- 5h 限额（`rate_limits.five_hour.used_percentage`，带颜色进度条）
-- 7d 限额（`rate_limits.seven_day.used_percentage`，带颜色进度条）
-- 模型名（`model.display_name`）
+- 订阅制：5h/7d 限额进度条（`rate_limits.*.used_percentage`）
+- API 模式（无 rate_limits）：会话累计费用（`cost.total_cost_usd`）
+- 上下文窗口（`context_window.context_window_size` + `used_percentage`）
+- Token 用量（input↑ output↓ cached）
+- 模型名 + effort level
 
-**进度条颜色**：绿色（< 50%）→ 黄色（50-80%）→ 红色（> 80%）
+### 进度条颜色
 
-**stdin 可用字段**：session_id, transcript_path, cwd, session_name, model, workspace, version, output_style, cost（total_cost_usd/duration/lines_added/lines_removed）, context_window（used_percentage/token 明细）, exceeds_200k_tokens, fast_mode, effort, thinking, rate_limits
+绿色（< 50%）→ 黄色（50-80%）→ 红色（> 80%）
+
+### stdin 可用字段
+
+session_id, transcript_path, cwd, session_name, model, workspace, version, output_style, cost（total_cost_usd/duration/lines_added/lines_removed）, context_window（used_percentage/token 明细）, exceeds_200k_tokens, fast_mode, effort, thinking, rate_limits
 
 ## 数据源
 
 | Agent | 路径 | 格式 | 备注 |
 |-------|------|------|------|
-| Claude Code | `~/.claude/projects/*/` | JSONL（每条 assistant 消息一个 usage） | rate limits 从 `~/.claude/tt-status.json` 读取 |
+| Claude Code | `~/.claude/projects/*/` | JSONL（每条 assistant 消息一个 usage） | rate limits 从 `~/.claude/cc-status.json` 读取 |
 | Codex | `~/.codex/sessions/` | JSONL（`total_token_usage` 为会话累计值） | 模型从 `state_5.sqlite` threads 表获取 |
 
 ### Codex 注意事项

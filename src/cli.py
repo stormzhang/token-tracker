@@ -194,11 +194,6 @@ def _show_status(agents, args: list[str]) -> None:
 
 
 def _show_agent_dashboard(agent_id: str):
-    if agent_id == "claude-code" and not is_setup():
-        console.print("[dim]首次运行，自动配置 statusLine hook...[/dim]")
-        setup()
-        console.print()
-
     agent_name = "Claude Code" if agent_id == "claude-code" else "Codex"
     data = _build_agent_data(agent_id, agent_name)
     if not data:
@@ -235,10 +230,6 @@ def _show_interactive_dashboard(agents):
     from io import StringIO
     from rich.console import Console as RichConsole
     import src.ui.tables as _tables
-
-    if any(a.id == "claude-code" for a in agents) and not is_setup():
-        console.print("[dim]首次运行，自动配置 statusLine hook...[/dim]")
-        setup()
 
     agent_names = [a.name for a in agents]
     console.print(f"[dim]加载数据...[/dim]")
