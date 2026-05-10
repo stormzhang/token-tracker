@@ -1,4 +1,4 @@
-# Token Tracker
+# Token Tracker (tt)
 
 本地 AI Agent Token 消耗追踪工具，CLI Dashboard 一目了然。
 
