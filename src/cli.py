@@ -7,13 +7,12 @@ from .analyzer.aggregator import aggregate_daily, aggregate_monthly, aggregate_s
 from .analyzer.blocks import analyze_blocks, calculate_p90
 from .hooks import is_setup, needs_update, setup, unsetup, update_hook
 from .ui.tables import (
-    console, render_daily, render_dashboard,
+    AGENT_LABEL, console, render_daily, render_dashboard,
     render_monthly, render_sessions, render_tab_bar, render_weekly,
 )
 
 AGENT_ALIASES = {"claude": "claude-code", "codex": "codex"}
 AGENT_LOADERS = {"claude-code": claude, "codex": codex}
-AGENT_NAMES = {"claude-code": "Claude", "codex": "Codex"}
 RATE_LIMIT_LOADERS = {"claude-code": load_claude_rate_limits, "codex": codex.load_rate_limits}
 
 
@@ -22,16 +21,18 @@ def _load_entries(agent_id: str, hours_back: int = 0):
     return loader.load_entries(hours_back=hours_back) if loader else []
 
 
-def _load_all_entries(hours_back: int = 0):
-    entries = []
-    for agent_id in AGENT_LOADERS:
-        entries += _load_entries(agent_id, hours_back)
-    entries.sort(key=lambda e: e.timestamp)
-    return entries
+def _aggregate_per_agent(agents, agg_fn):
+    stats = []
+    for a in agents:
+        entries = _load_entries(a.id)
+        for s in agg_fn(entries):
+            s.agent_id = a.id
+            stats.append(s)
+    return stats
 
 
 def _show_agent_dashboard(agent_id: str):
-    agent_name = "Claude Code" if agent_id == "claude-code" else "Codex"
+    agent_name = AGENT_LABEL.get(agent_id, agent_id)
     data = _build_agent_data(agent_id, agent_name)
     if not data:
         console.print(f"[yellow]暂无 token 使用数据[/yellow]")
@@ -187,30 +188,17 @@ def main():
 
     # 其他命令使用合并数据
     agent_names = [a.name for a in agents]
-    all_entries = _load_all_entries()
-    if not all_entries:
-        console.print("[yellow]暂无 token 使用数据[/yellow]")
-        sys.exit(0)
-
-    def _aggregate_per_agent(agg_fn):
-        stats = []
-        for a in agents:
-            entries = _load_entries(a.id)
-            for s in agg_fn(entries):
-                s.agent_id = a.id
-                stats.append(s)
-        return stats
 
     if command == "daily":
-        stats = _aggregate_per_agent(aggregate_daily)
-        stats.sort(key=lambda s: (s.date, s.agent_id))
+        stats = _aggregate_per_agent(agents, aggregate_daily)
+        stats.sort(key=lambda s: s.total_tokens, reverse=True)
         render_daily(stats, agents=agent_names)
     elif command == "weekly":
-        stats = _aggregate_per_agent(aggregate_weekly)
-        stats.sort(key=lambda s: (s.week, s.agent_id))
+        stats = _aggregate_per_agent(agents, aggregate_weekly)
+        stats.sort(key=lambda s: (s.week, s.agent_id), reverse=True)
         render_weekly(stats, agents=agent_names)
     elif command == "monthly":
-        stats = _aggregate_per_agent(aggregate_monthly)
+        stats = _aggregate_per_agent(agents, aggregate_monthly)
         stats.sort(key=lambda s: (s.month, s.agent_id))
         render_monthly(stats, agents=agent_names)
     elif command == "sessions":
@@ -220,7 +208,7 @@ def main():
                 limit = int(args[1])
             except ValueError:
                 pass
-        stats = _aggregate_per_agent(aggregate_sessions)
+        stats = _aggregate_per_agent(agents, aggregate_sessions)
         stats.sort(key=lambda s: s.start_time, reverse=True)
         render_sessions(stats, limit)
     else:

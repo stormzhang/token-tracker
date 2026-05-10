@@ -55,7 +55,12 @@ def _width_mode() -> str:
 
 
 AGENT_SHORT = {"claude-code": "CC", "codex": "Codex"}
+
 AGENT_LABEL = {"claude-code": "Claude Code", "codex": "Codex"}
+
+
+def _is_multi_agent(stats) -> bool:
+    return len(set(s.agent_id for s in stats if s.agent_id)) > 1
 
 
 MODEL_SHORT = {
@@ -360,7 +365,7 @@ def render_daily(stats: list[DailyStats], agents: list[str] | None = None) -> No
         console.print(f"[{_S.warn}]暂无数据[/{_S.warn}]")
         return
 
-    multi_agent = len(set(s.agent_id for s in stats if s.agent_id)) > 1
+    multi_agent = _is_multi_agent(stats)
     dates = set(s.date for s in stats)
     total_tokens = sum(s.total_tokens for s in stats)
     total_cost = sum(s.cost_usd for s in stats)
@@ -413,7 +418,7 @@ def render_weekly(stats: list[WeeklyStats], agents: list[str] | None = None) -> 
         console.print(f"[{_S.warn}]暂无数据[/{_S.warn}]")
         return
 
-    multi_agent = len(set(s.agent_id for s in stats if s.agent_id)) > 1
+    multi_agent = _is_multi_agent(stats)
     weeks = set(s.week for s in stats)
     total_tokens = sum(s.total_tokens for s in stats)
     total_cost = sum(s.cost_usd for s in stats)
@@ -486,7 +491,7 @@ def render_monthly(stats: list[MonthlyStats], agents: list[str] | None = None) -
         console.print(f"[{_S.warn}]暂无数据[/{_S.warn}]")
         return
 
-    multi_agent = len(set(s.agent_id for s in stats if s.agent_id)) > 1
+    multi_agent = _is_multi_agent(stats)
     months = set(s.month for s in stats)
     total_tokens = sum(s.total_tokens for s in stats)
     total_cost = sum(s.cost_usd for s in stats)
@@ -611,7 +616,7 @@ def render_sessions(stats: list[SessionStats], limit: int = 20) -> None:
         console.print(f"[{_S.warn}]暂无数据[/{_S.warn}]")
         return
 
-    multi_agent = len(set(s.agent_id for s in stats if s.agent_id)) > 1
+    multi_agent = _is_multi_agent(stats)
     shown = stats[:limit]
     total_tokens = sum(s.total_tokens for s in shown)
     total_cost = sum(s.cost_usd for s in shown)
@@ -657,67 +662,6 @@ def render_sessions(stats: list[SessionStats], limit: int = 20) -> None:
             _fmt_cost(s.cost_usd),
             str(s.message_count),
         ]
-        table.add_row(*row)
-
-    console.print(table)
-    console.print()
-
-
-def render_blocks(blocks: list[SessionBlock]) -> None:
-    if not blocks:
-        console.print(f"[{_S.warn}]暂无数据[/{_S.warn}]")
-        return
-
-    active_blocks = [b for b in blocks if not b.is_gap]
-    if not active_blocks:
-        console.print(f"[{_S.warn}]暂无计费块数据[/{_S.warn}]")
-        return
-
-    active = [b for b in active_blocks if b.is_active]
-
-    console.print()
-
-    if active:
-        for b in active:
-            _render_active_block(b)
-
-    mode = _width_mode()
-    table = Table(
-        title="历史计费块",
-        box=box.SIMPLE_HEAVY,
-        header_style="bold",
-        padding=(0, 1),
-    )
-    table.add_column("时间段", style=_S.token, no_wrap=True)
-    table.add_column("状态", justify="center", no_wrap=True)
-    if mode == "wide":
-        table.add_column("Input", justify="right")
-        table.add_column("Output", justify="right")
-    table.add_column("总Token", justify="right", style="bold")
-    table.add_column("等效成本", justify="right", style=_S.good)
-    if mode != "compact":
-        table.add_column("速率", justify="right")
-    table.add_column("消息", justify="right", style=_S.dim)
-
-    for b in active_blocks:
-        start = b.start_time.strftime("%m-%d %H:%M")
-        end = b.end_time.strftime("%H:%M")
-        time_range = f"{start} → {end}"
-
-        if b.is_active:
-            status = Text("● 活跃", style=_S.accent)
-            rate = f"{_fmt_tokens(int(b.burn_rate))}/min" if b.burn_rate > 0 else "-"
-        else:
-            status = Text("  结束", style=_S.dim)
-            rate = "-"
-
-        row: list = [time_range, status]
-        if mode == "wide":
-            row += [_fmt_tokens(b.input_tokens), _fmt_tokens(b.output_tokens)]
-        row += [_fmt_tokens(b.total_tokens), _fmt_cost(b.cost_usd)]
-        if mode != "compact":
-            row.append(rate)
-        row.append(str(len(b.entries)))
         table.add_row(*row)
 
     console.print(table)
