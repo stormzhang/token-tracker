@@ -48,7 +48,9 @@ def _build_agent_data(agent_id: str, agent_name: str) -> dict | None:
     weekly = aggregate_weekly(entries)
     monthly = aggregate_monthly(entries)
     sessions = aggregate_sessions(entries)
-    recent = _load_entries(agent_id, hours_back=48)
+    from datetime import datetime, timezone, timedelta
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=48)
+    recent = [e for e in entries if e.timestamp >= cutoff]
     blocks = analyze_blocks(recent)
     rate_limits = RATE_LIMIT_LOADERS.get(agent_id, lambda: None)()
     p90 = None

@@ -4,7 +4,7 @@ Track token usage across local AI agents. Supports **Claude Code** and **Codex**
 
 Custom StatusLine integration + CLI Dashboard — see token usage, cost, and rate limits at a glance.
 
-![Python](https://img.shields.io/badge/python-3.12+-blue) ![License](https://img.shields.io/badge/license-MIT-green)
+![Python](https://img.shields.io/badge/python-3.11+-blue) ![License](https://img.shields.io/badge/license-MIT-green)
 
 [中文](README.md)
 

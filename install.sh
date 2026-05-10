@@ -2,7 +2,7 @@
 set -e
 
 if ! command -v pip &>/dev/null && ! command -v pip3 &>/dev/null; then
-    echo "Error: pip not found. Please install Python 3.12+ first."
+    echo "Error: pip not found. Please install Python 3.11+ first."
     exit 1
 fi
 
