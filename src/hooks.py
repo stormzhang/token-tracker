@@ -1,13 +1,25 @@
 import json
 import os
+import re
 import stat
+import tomllib
 
 from .ui.tables import console
 
 CLAUDE_SETTINGS = os.path.expanduser("~/.claude/settings.json")
 HOOK_SCRIPT_PATH = os.path.expanduser("~/.claude/tt-statusline.py")
+CODEX_CONFIG = os.path.expanduser("~/.codex/config.toml")
+CODEX_BACKUP = os.path.expanduser("~/.codex/tt-backup.json")
 BACKUP_KEY = "tokenTracker"
 PREVIOUS_STATUSLINE_KEY = "previousStatusLine"
+
+CODEX_STATUS_LINE = [
+    "project",
+    "five-hour-limit",
+    "weekly-limit",
+    "context-remaining",
+    "model-with-reasoning",
+]
 
 HOOK_SCRIPT = r'''#!/usr/bin/env python3
 """Claude Code statusLine — 状态栏显示 + 数据持久化到 tt-status.json"""
@@ -132,6 +144,25 @@ def _is_token_tracker_statusline(status_line: dict | None) -> bool:
 
 
 def setup() -> None:
+    has_cc = os.path.isdir(os.path.dirname(CLAUDE_SETTINGS))
+    has_codex = os.path.exists(CODEX_CONFIG)
+
+    if not has_cc and not has_codex:
+        console.print("[red]未检测到 Claude Code 或 Codex，请先安装其中之一[/red]")
+        return
+
+    if has_cc:
+        _setup_claude()
+    else:
+        console.print("[dim]未检测到 Claude Code，跳过[/dim]")
+
+    if has_codex:
+        _setup_codex()
+    else:
+        console.print("[dim]未检测到 Codex，跳过[/dim]")
+
+
+def _setup_claude() -> None:
     with open(HOOK_SCRIPT_PATH, "w", encoding="utf-8") as f:
         f.write(HOOK_SCRIPT)
     st = os.stat(HOOK_SCRIPT_PATH)
@@ -159,14 +190,68 @@ def setup() -> None:
     with open(CLAUDE_SETTINGS, "w", encoding="utf-8") as f:
         json.dump(settings, f, indent=2, ensure_ascii=False)
 
-    console.print(f"[green]✓[/green] Hook 脚本已写入: {HOOK_SCRIPT_PATH}")
-    console.print(f"[green]✓[/green] 已注册到: {CLAUDE_SETTINGS}")
-    console.print()
-    console.print("[dim]重启 Claude Code 后生效，statusLine 数据将自动采集到:[/dim]")
-    console.print(f"[dim]  ~/.claude/tt-status.json[/dim]")
+    console.print(f"[green]✓[/green] Claude Code statusLine 已配置")
+    console.print("[dim]重启 Claude Code 后生效[/dim]")
+
+
+def _build_status_line_toml() -> str:
+    items = ",\n".join(f'  "{item}"' for item in CODEX_STATUS_LINE)
+    return f"status_line = [\n{items},\n]"
+
+
+def _setup_codex() -> None:
+    if not os.path.exists(CODEX_CONFIG):
+        return
+
+    try:
+        with open(CODEX_CONFIG, "r", encoding="utf-8") as f:
+            content = f.read()
+        parsed = tomllib.loads(content)
+    except (OSError, tomllib.TOMLDecodeError):
+        return
+
+    old_status_line = parsed.get("tui", {}).get("status_line")
+    if old_status_line == CODEX_STATUS_LINE:
+        console.print(f"[dim]Codex status_line 已是目标配置，跳过[/dim]")
+        return
+
+    if old_status_line is not None:
+        with open(CODEX_BACKUP, "w", encoding="utf-8") as f:
+            json.dump({"status_line": old_status_line}, f)
+        content = re.sub(
+            r'status_line\s*=\s*\[.*?\]',
+            _build_status_line_toml(),
+            content,
+            flags=re.DOTALL,
+        )
+    elif "[tui]" in content:
+        content = content.replace("[tui]", f"[tui]\n{_build_status_line_toml()}")
+    else:
+        content += f"\n[tui]\n{_build_status_line_toml()}\n"
+
+    with open(CODEX_CONFIG, "w", encoding="utf-8") as f:
+        f.write(content)
+
+    console.print(f"[green]✓[/green] Codex status_line 已配置: {CODEX_CONFIG}")
+    if old_status_line is not None:
+        console.print(f"[dim]原配置已备份到: {CODEX_BACKUP}[/dim]")
+    console.print("[dim]重启 Codex 后生效[/dim]")
 
 
 def unsetup() -> None:
+    has_cc = os.path.isdir(os.path.dirname(CLAUDE_SETTINGS))
+    has_codex = os.path.exists(CODEX_CONFIG)
+
+    if has_cc:
+        _unsetup_claude()
+    if has_codex:
+        _unsetup_codex()
+
+    if not has_cc and not has_codex:
+        console.print("[dim]未检测到 Claude Code 或 Codex[/dim]")
+
+
+def _unsetup_claude() -> None:
     if os.path.exists(HOOK_SCRIPT_PATH):
         os.remove(HOOK_SCRIPT_PATH)
         console.print(f"[green]✓[/green] 已删除: {HOOK_SCRIPT_PATH}")
@@ -181,10 +266,10 @@ def unsetup() -> None:
             previous = backup.get(PREVIOUS_STATUSLINE_KEY)
             if isinstance(previous, dict):
                 settings["statusLine"] = previous
-                console.print(f"[green]✓[/green] 已恢复安装前的 statusLine 配置")
+                console.print(f"[green]✓[/green] Claude Code statusLine 已恢复原配置")
             else:
                 settings.pop("statusLine", None)
-                console.print(f"[green]✓[/green] 已从 settings.json 移除 statusLine 配置")
+                console.print(f"[green]✓[/green] Claude Code statusLine 已移除")
 
             if BACKUP_KEY in settings:
                 settings[BACKUP_KEY].pop(PREVIOUS_STATUSLINE_KEY, None)
@@ -195,10 +280,50 @@ def unsetup() -> None:
                 json.dump(settings, f, indent=2, ensure_ascii=False)
         else:
             console.print("[dim]当前 statusLine 不是 tt-statusline，保留现有配置[/dim]")
-    else:
-        console.print("[dim]settings.json 不存在[/dim]")
 
     status_file = os.path.expanduser("~/.claude/tt-status.json")
     if os.path.exists(status_file):
         os.remove(status_file)
         console.print(f"[green]✓[/green] 已删除缓存: {status_file}")
+
+
+def _unsetup_codex() -> None:
+    if not os.path.exists(CODEX_CONFIG):
+        return
+
+    try:
+        with open(CODEX_CONFIG, "r", encoding="utf-8") as f:
+            content = f.read()
+        parsed = tomllib.loads(content)
+    except (OSError, tomllib.TOMLDecodeError):
+        return
+
+    if parsed.get("tui", {}).get("status_line") is None:
+        return
+
+    if os.path.exists(CODEX_BACKUP):
+        with open(CODEX_BACKUP, "r", encoding="utf-8") as f:
+            backup = json.load(f)
+        old_items = backup.get("status_line", [])
+        items = ",\n".join(f'  "{item}"' for item in old_items)
+        old_toml = f"status_line = [\n{items},\n]"
+        content = re.sub(
+            r'status_line\s*=\s*\[.*?\]',
+            old_toml,
+            content,
+            flags=re.DOTALL,
+        )
+        with open(CODEX_CONFIG, "w", encoding="utf-8") as f:
+            f.write(content)
+        os.remove(CODEX_BACKUP)
+        console.print(f"[green]✓[/green] Codex status_line 已恢复原配置")
+    else:
+        content = re.sub(
+            r'status_line\s*=\s*\[.*?\]\n?',
+            '',
+            content,
+            flags=re.DOTALL,
+        )
+        with open(CODEX_CONFIG, "w", encoding="utf-8") as f:
+            f.write(content)
+        console.print(f"[green]✓[/green] Codex status_line 已移除")
