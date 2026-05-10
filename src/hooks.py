@@ -92,7 +92,9 @@ def render(data):
     ctx = data.get("context_window", {})
     if ctx.get("used_percentage") is not None:
         size = ctx.get("context_window_size", 0)
-        parts.append(f"{C['yellow']}{fmt_tokens(size)} CTX: {ctx['used_percentage']:.0f}%{C['reset']}")
+        pct = ctx["used_percentage"]
+        cc = C["green"] if pct < 40 else C["yellow"] if pct < 60 else C["red"]
+        parts.append(f"{cc}{fmt_tokens(size)} CTX: {pct:.0f}%{C['reset']}")
 
     total_in = ctx.get("total_input_tokens", 0)
     total_out = ctx.get("total_output_tokens", 0)

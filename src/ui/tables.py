@@ -1,4 +1,5 @@
 import os
+from collections import defaultdict
 from datetime import datetime, timezone
 
 from rich.console import Console
@@ -61,6 +62,13 @@ AGENT_LABEL = {"claude-code": "Claude Code", "codex": "Codex"}
 
 def _is_multi_agent(stats) -> bool:
     return len(set(s.agent_id for s in stats if s.agent_id)) > 1
+
+
+def _group_by_agent(stats) -> dict[str, list]:
+    by_agent: dict[str, list] = defaultdict(list)
+    for s in stats:
+        by_agent[s.agent_id].append(s)
+    return by_agent
 
 
 MODEL_SHORT = {
@@ -219,7 +227,6 @@ def _render_header(agents: list[str], total_tokens: int, total_cost: float,
 def _render_agent_summaries(stats_list, multi_agent: bool) -> None:
     if not multi_agent:
         return
-    from collections import defaultdict
     by_agent: dict[str, dict] = defaultdict(lambda: {"tokens": 0, "cost": 0.0, "sessions": 0, "messages": 0})
     for s in stats_list:
         if not s.agent_id:
@@ -489,12 +496,8 @@ def render_weekly(stats: list[WeeklyStats], agents: list[str] | None = None) -> 
     _render_header(agents or ["Claude Code"], total_tokens, total_cost, total_sessions, total_msgs, len(weeks) * 7)
 
     if multi_agent:
-        from collections import defaultdict
-        by_agent: dict[str, list] = defaultdict(list)
-        for s in stats:
-            by_agent[s.agent_id].append(s)
-        for agent_id in sorted(by_agent):
-            _render_weekly_table(by_agent[agent_id], title=AGENT_LABEL.get(agent_id, agent_id))
+        for agent_id, group in sorted(_group_by_agent(stats).items()):
+            _render_weekly_table(group, title=AGENT_LABEL.get(agent_id, agent_id))
     else:
         _render_weekly_table(stats)
 
@@ -572,12 +575,8 @@ def render_monthly(stats: list[MonthlyStats], agents: list[str] | None = None) -
     _render_header(agents or ["Claude Code"], total_tokens, total_cost, total_sessions, total_msgs, days)
 
     if multi_agent:
-        from collections import defaultdict
-        by_agent: dict[str, list] = defaultdict(list)
-        for s in stats:
-            by_agent[s.agent_id].append(s)
-        for agent_id in sorted(by_agent):
-            _render_monthly_table(by_agent[agent_id], title=AGENT_LABEL.get(agent_id, agent_id))
+        for agent_id, group in sorted(_group_by_agent(stats).items()):
+            _render_monthly_table(group, title=AGENT_LABEL.get(agent_id, agent_id))
     else:
         _render_monthly_table(stats)
 
