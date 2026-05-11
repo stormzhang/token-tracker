@@ -38,6 +38,7 @@ Custom StatusLine integration + CLI Dashboard — see token usage, cost, and rat
 - **Cost analysis** — per-session, daily, weekly, monthly cost breakdown with per-agent grouping
 - **Session insights** — project, model, duration, message count per session
 - **Zero config** — auto-detects installed agents, reads local data directly
+- **Privacy first** — all data stays local, no collection or upload of any user information, lightweight and worry-free
 
 ## Install
 
