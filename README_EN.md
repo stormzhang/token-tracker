@@ -49,6 +49,7 @@ Or via pip:
 
 ```bash
 pip install token-tracker
+tt setup
 ```
 
 ## Usage

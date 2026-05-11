@@ -140,10 +140,18 @@ def _read_key(tty, termios):
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
 
+def _get_version() -> str:
+    from importlib.metadata import version
+    return version("token-tracker")
+
+
 def main():
     args = sys.argv[1:]
     command = args[0] if args else "dashboard"
 
+    if command in ("--version", "-v", "-V"):
+        print(f"tt {_get_version()}")
+        return
     if command == "setup":
         setup()
         return
@@ -215,7 +223,7 @@ def main():
         render_sessions(stats, limit)
     else:
         console.print(f"[red]未知命令: {command}[/red]")
-        console.print("[dim]可用命令: dashboard, daily, weekly, monthly, sessions, claude, codex, setup, unsetup[/dim]")
+        console.print("[dim]可用命令: dashboard, daily, weekly, monthly, sessions, claude, codex, setup, unsetup, --version[/dim]")
         sys.exit(1)
 
 

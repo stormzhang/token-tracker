@@ -49,6 +49,7 @@ curl -sSL https://raw.githubusercontent.com/stormzhang/token-tracker/master/inst
 
 ```bash
 pip install token-tracker
+tt setup
 ```
 
 ## 使用
