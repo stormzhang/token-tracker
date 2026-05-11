@@ -64,48 +64,96 @@ def _build_agent_data(agent_id: str, agent_name: str) -> dict | None:
     )
 
 
+def _initial_agent_index(agents) -> int:
+    import os
+
+    preferred = None
+    if os.environ.get("CODEX_THREAD_ID") or os.environ.get("CODEX_SANDBOX"):
+        preferred = "codex"
+    elif os.environ.get("CLAUDE_CONFIG_DIR") or os.environ.get("CLAUDECODE"):
+        preferred = "claude-code"
+
+    if preferred:
+        for i, agent in enumerate(agents):
+            if agent.id == preferred:
+                return i
+    return 0
+
+
+def _fit_screen(text: str, height: int, scroll_offset: int) -> tuple[str, int]:
+    lines = text.splitlines()
+    if not lines:
+        return "", 0
+    max_body = max(1, height - 1)
+    max_scroll = max(0, len(lines) - max_body)
+    scroll_offset = max(0, min(scroll_offset, max_scroll))
+    visible = lines[:1] + lines[1 + scroll_offset:1 + scroll_offset + max_body - 1]
+    return "\n".join(visible), max_scroll
+
+
 def _show_interactive_dashboard(agents):
     import tty
     import termios
+    import shutil
     from io import StringIO
     from rich.console import Console as RichConsole
     import src.ui.tables as _tables
 
     agent_names = [a.name for a in agents]
-    current = 0
+    current = _initial_agent_index(agents)
+    scroll_offset = 0
     orig = _tables.console
 
-    sys.stdout.write("\033[?1049h\033[?25l")
-    sys.stdout.write("\033[H\033[J\033[2m加载数据...\033[0m")
-    sys.stdout.flush()
-    cache = {a.id: _build_agent_data(a.id, a.name) for a in agents}
+    sys.stdout.write("\033[?1049h\033[?7l\033[2J\033[3J\033[H\033[?25l")
+    cache = {}
 
     try:
         while True:
+            agent = agents[current]
+            if agent.id not in cache:
+                sys.stdout.write("\033[2J\033[3J\033[H\033[2m加载数据...\033[0m")
+                sys.stdout.flush()
+                cache[agent.id] = _build_agent_data(agent.id, agent.name)
+
+            size = shutil.get_terminal_size((80, 24))
+            width = size.columns
+            height = size.lines
+
             buf = StringIO()
             _tables.console = RichConsole(
-                file=buf, width=orig.width, force_terminal=True,
+                file=buf, width=width, force_terminal=True,
             )
             render_tab_bar(agent_names, current)
-            data = cache[agents[current].id]
+            data = cache[agent.id]
             if data:
-                render_dashboard(**data)
+                render_dashboard(**data, session_limit=10, top_margin=False)
             else:
                 _tables.console.print(f"[yellow]暂无数据[/yellow]")
             _tables.console = orig
 
-            sys.stdout.write("\033[H\033[J" + buf.getvalue())
+            screen, max_scroll = _fit_screen(buf.getvalue(), height, scroll_offset)
+            sys.stdout.write("\033[2J\033[3J\033[H" + screen)
             sys.stdout.flush()
 
             key = _read_key(tty, termios)
             if key == "left":
                 current = (current - 1) % len(agents)
+                scroll_offset = 0
             elif key == "right":
                 current = (current + 1) % len(agents)
+                scroll_offset = 0
+            elif key == "up":
+                scroll_offset = max(0, scroll_offset - 1)
+            elif key == "down":
+                scroll_offset = min(max_scroll, scroll_offset + 1)
+            elif key == "page_up":
+                scroll_offset = max(0, scroll_offset - max(1, height - 3))
+            elif key == "page_down":
+                scroll_offset = min(max_scroll, scroll_offset + max(1, height - 3))
             elif key == "quit":
                 break
     finally:
-        sys.stdout.write("\033[?25h\033[?1049l")
+        sys.stdout.write("\033[?7h\033[?25h\033[?1049l")
         sys.stdout.flush()
         _tables.console = orig
 
@@ -128,11 +176,27 @@ def _read_key(tty, termios):
                     return "left"
                 if ch3 == b"C":
                     return "right"
+                if ch3 == b"A":
+                    return "up"
+                if ch3 == b"B":
+                    return "down"
+                if ch3 in (b"5", b"6"):
+                    if select.select([fd], [], [], 0.05)[0]:
+                        _os.read(fd, 1)
+                    return "page_up" if ch3 == b"5" else "page_down"
             return "other"
-        if ch in (b"h", b"k"):
+        if ch == b"h":
             return "left"
-        if ch in (b"l", b"j"):
+        if ch == b"l":
             return "right"
+        if ch == b"k":
+            return "up"
+        if ch == b"j":
+            return "down"
+        if ch == b"b":
+            return "page_up"
+        if ch == b"f":
+            return "page_down"
         if ch in (b"q", b"Q", b"\x03"):
             return "quit"
         return "other"
@@ -166,7 +230,8 @@ def main():
 
     agent_ids = {a.id for a in agents}
 
-    console.print(f"[dim]检测到: {', '.join(a.name + ' ✓' for a in agents)}[/dim]")
+    if command != "dashboard":
+        console.print(f"[dim]检测到: {', '.join(a.name + ' ✓' for a in agents)}[/dim]")
 
     if not is_setup():
         setup(auto=True)

@@ -184,14 +184,21 @@ def _render_week_section(lines: Text, week: WeeklyStats,
 def render_tab_bar(agent_names: list[str], current: int) -> None:
     line = Text()
     line.append("  ")
+    compact = console.width < 72
     for i, name in enumerate(agent_names):
         if i > 0:
             line.append(" │ ", style=_S.dim)
+        label = AGENT_SHORT.get("claude-code" if name == "Claude Code" else name.lower(), name)
+        if compact and name == "Claude Code":
+            label = "CC"
+        elif compact:
+            label = name[:8]
         if i == current:
-            line.append(f" {name} ", style="bold reverse")
+            line.append(f" {label} ", style="bold reverse")
         else:
-            line.append(f" {name} ", style=_S.dim)
-    line.append("          ← → 切换  q / ESC 退出", style=_S.dim)
+            line.append(f" {label} ", style=_S.dim)
+    help_text = "  ←→ jk q/ESC退出" if compact else "  ← → 切换  ↑ ↓ 滚动  q / ESC 退出"
+    line.append(help_text, style=_S.dim)
     console.print(line)
 
 
@@ -200,9 +207,11 @@ def _project_short(project: str) -> str:
 
 
 def _render_header(agents: list[str], total_tokens: int, total_cost: float,
-                   total_sessions: int, total_messages: int, days: int) -> None:
+                   total_sessions: int, total_messages: int, days: int,
+                   top_margin: bool = True) -> None:
     agent_text = " ".join(f"[{_S.good}]●[/{_S.good}] {a}" for a in agents)
-    console.print()
+    if top_margin:
+        console.print()
     console.print(Panel(
         f"[bold]Token Tracker[/bold]  {agent_text}",
         border_style="blue",
@@ -262,6 +271,8 @@ def render_dashboard(
     rate_limits: RateLimits | None = None,
     p90: P90Limits | None = None,
     agents: list[str] | None = None,
+    session_limit: int = 10,
+    top_margin: bool = True,
 ) -> None:
     if not daily_stats:
         console.print(f"[{_S.warn}]暂无数据[/{_S.warn}]")
@@ -272,7 +283,15 @@ def render_dashboard(
     total_msgs = sum(s.message_count for s in daily_stats)
     total_sessions = sum(s.session_count for s in daily_stats)
 
-    _render_header(agents or ["Claude Code"], total_tokens, total_cost, total_sessions, total_msgs, len(daily_stats))
+    _render_header(
+        agents or ["Claude Code"],
+        total_tokens,
+        total_cost,
+        total_sessions,
+        total_msgs,
+        len(daily_stats),
+        top_margin=top_margin,
+    )
 
     # --- 本月概览 ---
     if monthly_stats:
@@ -300,8 +319,8 @@ def render_dashboard(
             _render_idle_panel(rate_limits, cur_week, last_week)
 
     # --- 最近十条会话 ---
-    if sessions:
-        _render_recent_sessions(sessions[:10])
+    if sessions and session_limit > 0:
+        _render_recent_sessions(sessions[:session_limit])
 
     console.print()
 
