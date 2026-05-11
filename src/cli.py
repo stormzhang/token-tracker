@@ -1,4 +1,5 @@
 import sys
+from datetime import datetime, timedelta, timezone
 
 from .adapters import claude, codex
 from .adapters.rate_limits import load_rate_limits as load_claude_rate_limits
@@ -48,7 +49,6 @@ def _build_agent_data(agent_id: str, agent_name: str) -> dict | None:
     weekly = aggregate_weekly(entries)
     monthly = aggregate_monthly(entries)
     sessions = aggregate_sessions(entries)
-    from datetime import datetime, timezone, timedelta
     cutoff = datetime.now(timezone.utc) - timedelta(hours=48)
     recent = [e for e in entries if e.timestamp >= cutoff]
     blocks = analyze_blocks(recent)
