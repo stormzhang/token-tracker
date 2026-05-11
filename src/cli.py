@@ -1,5 +1,4 @@
 import sys
-from datetime import datetime, timedelta, timezone
 
 from .adapters import claude, codex
 from .adapters.rate_limits import load_rate_limits as load_claude_rate_limits
@@ -49,6 +48,7 @@ def _build_agent_data(agent_id: str, agent_name: str) -> dict | None:
     weekly = aggregate_weekly(entries)
     monthly = aggregate_monthly(entries)
     sessions = aggregate_sessions(entries)
+    from datetime import datetime, timezone, timedelta
     cutoff = datetime.now(timezone.utc) - timedelta(hours=48)
     recent = [e for e in entries if e.timestamp >= cutoff]
     blocks = analyze_blocks(recent)
@@ -72,14 +72,14 @@ def _show_interactive_dashboard(agents):
     import src.ui.tables as _tables
 
     agent_names = [a.name for a in agents]
-    console.print(f"[dim]加载数据...[/dim]")
-    cache = {a.id: _build_agent_data(a.id, a.name) for a in agents}
-
     current = 0
     orig = _tables.console
 
     sys.stdout.write("\033[?1049h\033[?25l")
+    sys.stdout.write("\033[H\033[J\033[2m加载数据...\033[0m")
     sys.stdout.flush()
+    cache = {a.id: _build_agent_data(a.id, a.name) for a in agents}
+
     try:
         while True:
             buf = StringIO()
@@ -94,7 +94,7 @@ def _show_interactive_dashboard(agents):
                 _tables.console.print(f"[yellow]暂无数据[/yellow]")
             _tables.console = orig
 
-            sys.stdout.write("\033[2J\033[H" + buf.getvalue())
+            sys.stdout.write("\033[H\033[J" + buf.getvalue())
             sys.stdout.flush()
 
             key = _read_key(tty, termios)

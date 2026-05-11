@@ -1,82 +1,99 @@
 from collections import defaultdict
-from datetime import timedelta
+from datetime import datetime
 
 from ..adapters.types import DailyStats, MonthlyStats, SessionStats, UsageEntry, WeeklyStats
 from .cost import calculate_cost
 
 
-def _accumulate(stat, entry: UsageEntry) -> None:
-    cost = calculate_cost(entry)
-    stat.input_tokens += entry.input_tokens
-    stat.output_tokens += entry.output_tokens
-    stat.cache_creation_tokens += entry.cache_creation_tokens
-    stat.cache_read_tokens += entry.cache_read_tokens
-    stat.total_tokens += entry.total_tokens
-    stat.cost_usd += cost
-    stat.message_count += entry.message_count
-    if hasattr(stat, "models"):
-        stat.models[entry.model] = stat.models.get(entry.model, 0) + entry.total_tokens
-
-
 def aggregate_daily(entries: list[UsageEntry]) -> list[DailyStats]:
     by_date: dict[str, DailyStats] = {}
-    sessions: dict[str, set[str]] = defaultdict(set)
+    sessions_by_date: dict[str, set[str]] = defaultdict(set)
 
     for e in entries:
-        key = e.timestamp.strftime("%Y-%m-%d")
-        if key not in by_date:
-            by_date[key] = DailyStats(date=key)
-        _accumulate(by_date[key], e)
-        sessions[key].add(e.session_id)
+        date_str = e.timestamp.strftime("%Y-%m-%d")
+        if date_str not in by_date:
+            by_date[date_str] = DailyStats(date=date_str)
+        s = by_date[date_str]
+        cost = calculate_cost(e)
+        s.input_tokens += e.input_tokens
+        s.output_tokens += e.output_tokens
+        s.cache_creation_tokens += e.cache_creation_tokens
+        s.cache_read_tokens += e.cache_read_tokens
+        s.total_tokens += e.total_tokens
+        s.cost_usd += cost
+        s.message_count += e.message_count
+        s.models[e.model] = s.models.get(e.model, 0) + e.total_tokens
+        sessions_by_date[date_str].add(e.session_id)
 
-    for key, sids in sessions.items():
-        by_date[key].session_count = len(sids)
+    for date_str, sessions in sessions_by_date.items():
+        by_date[date_str].session_count = len(sessions)
 
     return sorted(by_date.values(), key=lambda s: s.date)
 
 
 def aggregate_monthly(entries: list[UsageEntry]) -> list[MonthlyStats]:
     by_month: dict[str, MonthlyStats] = {}
-    sessions: dict[str, set[str]] = defaultdict(set)
+    sessions_by_month: dict[str, set[str]] = defaultdict(set)
 
     for e in entries:
-        key = e.timestamp.strftime("%Y-%m")
-        if key not in by_month:
-            by_month[key] = MonthlyStats(month=key)
-        _accumulate(by_month[key], e)
-        sessions[key].add(e.session_id)
+        month_str = e.timestamp.strftime("%Y-%m")
+        if month_str not in by_month:
+            by_month[month_str] = MonthlyStats(month=month_str)
+        s = by_month[month_str]
+        cost = calculate_cost(e)
+        s.input_tokens += e.input_tokens
+        s.output_tokens += e.output_tokens
+        s.cache_creation_tokens += e.cache_creation_tokens
+        s.cache_read_tokens += e.cache_read_tokens
+        s.total_tokens += e.total_tokens
+        s.cost_usd += cost
+        s.message_count += e.message_count
+        s.models[e.model] = s.models.get(e.model, 0) + e.total_tokens
+        sessions_by_month[month_str].add(e.session_id)
 
-    for key, sids in sessions.items():
-        by_month[key].session_count = len(sids)
+    for month_str, sessions in sessions_by_month.items():
+        by_month[month_str].session_count = len(sessions)
 
     return sorted(by_month.values(), key=lambda s: s.month)
 
 
 def aggregate_weekly(entries: list[UsageEntry]) -> list[WeeklyStats]:
+    from datetime import timedelta
+
     by_week: dict[str, WeeklyStats] = {}
-    sessions: dict[str, set[str]] = defaultdict(set)
+    sessions_by_week: dict[str, set[str]] = defaultdict(set)
 
     for e in entries:
         monday = e.timestamp.date() - timedelta(days=e.timestamp.weekday())
         sunday = monday + timedelta(days=6)
-        key = monday.isoformat()
-        if key not in by_week:
-            by_week[key] = WeeklyStats(
-                week=key,
+        week_key = monday.isoformat()
+        if week_key not in by_week:
+            by_week[week_key] = WeeklyStats(
+                week=week_key,
                 week_start=monday.strftime("%m-%d"),
                 week_end=sunday.strftime("%m-%d"),
             )
-        _accumulate(by_week[key], e)
-        sessions[key].add(e.session_id)
+        s = by_week[week_key]
+        cost = calculate_cost(e)
+        s.input_tokens += e.input_tokens
+        s.output_tokens += e.output_tokens
+        s.cache_creation_tokens += e.cache_creation_tokens
+        s.cache_read_tokens += e.cache_read_tokens
+        s.total_tokens += e.total_tokens
+        s.cost_usd += cost
+        s.message_count += e.message_count
+        s.models[e.model] = s.models.get(e.model, 0) + e.total_tokens
+        sessions_by_week[week_key].add(e.session_id)
 
-    for key, sids in sessions.items():
-        by_week[key].session_count = len(sids)
+    for week_key, sessions in sessions_by_week.items():
+        by_week[week_key].session_count = len(sessions)
 
     return sorted(by_week.values(), key=lambda s: s.week)
 
 
 def aggregate_sessions(entries: list[UsageEntry]) -> list[SessionStats]:
     by_session: dict[str, list[UsageEntry]] = defaultdict(list)
+
     for e in entries:
         by_session[e.session_id].append(e)
 
@@ -101,7 +118,15 @@ def aggregate_sessions(entries: list[UsageEntry]) -> list[SessionStats]:
             duration_minutes=round(duration, 1),
         )
         for e in session_entries:
-            _accumulate(s, e)
+            cost = calculate_cost(e)
+            s.input_tokens += e.input_tokens
+            s.output_tokens += e.output_tokens
+            s.cache_creation_tokens += e.cache_creation_tokens
+            s.cache_read_tokens += e.cache_read_tokens
+            s.total_tokens += e.total_tokens
+            s.cost_usd += cost
+            s.message_count += e.message_count
+
         sessions.append(s)
 
     sessions.sort(key=lambda s: s.start_time, reverse=True)

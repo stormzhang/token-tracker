@@ -117,14 +117,17 @@ def _fmt_duration(minutes: float) -> str:
     return f"{int(minutes)}min"
 
 
-def _bar_width() -> int:
-    return 20 if _width_mode() == "compact" else 30
+def _display_width(s: str) -> int:
+    w = 0
+    for ch in s:
+        w += 2 if ord(ch) > 0x7F else 1
+    return w
 
 
 def _append_bar(lines: Text, label: str, pct: float,
                 bar_width: int, suffix: str = "") -> None:
     filled = int(pct / 100 * bar_width)
-    bar = "=" * filled + "-" * (bar_width - filled)
+    bar = "█" * filled + "░" * (bar_width - filled)
     bar_style = _S.bar_high if pct > 80 else _S.bar_mid if pct > 50 else _S.bar_low
     lines.append(label, style=_S.dim)
     lines.append(bar, style=bar_style)
@@ -135,7 +138,7 @@ def _append_bar(lines: Text, label: str, pct: float,
 
 
 def _append_trend(lines: Text, current: float, previous: float) -> None:
-    arrow = "^" if current >= previous else "v"
+    arrow = "↑" if current >= previous else "↓"
     style = _S.bad if current >= previous else _S.good
     lines.append(f"{arrow}", style=style)
 
@@ -183,12 +186,12 @@ def render_tab_bar(agent_names: list[str], current: int) -> None:
     line.append("  ")
     for i, name in enumerate(agent_names):
         if i > 0:
-            line.append(" | ", style=_S.dim)
+            line.append(" │ ", style=_S.dim)
         if i == current:
             line.append(f" {name} ", style="bold reverse")
         else:
             line.append(f" {name} ", style=_S.dim)
-    line.append("          < > 切换  q / ESC 退出", style=_S.dim)
+    line.append("          ← → 切换  q / ESC 退出", style=_S.dim)
     console.print(line)
 
 
@@ -198,7 +201,7 @@ def _project_short(project: str) -> str:
 
 def _render_header(agents: list[str], total_tokens: int, total_cost: float,
                    total_sessions: int, total_messages: int, days: int) -> None:
-    agent_text = " ".join(f"[{_S.good}]{a}[/{_S.good}]" for a in agents)
+    agent_text = " ".join(f"[{_S.good}]●[/{_S.good}] {a}" for a in agents)
     console.print()
     console.print(Panel(
         f"[bold]Token Tracker[/bold]  {agent_text}",
@@ -611,7 +614,7 @@ def _render_model_breakdown(stats: list[MonthlyStats]) -> None:
     for model, tokens in sorted_models[:8]:
         pct = tokens / total * 100 if total > 0 else 0
         bar_width = int(pct / 100 * 20)
-        bar_text = "=" * bar_width + "-" * (20 - bar_width)
+        bar_text = "█" * bar_width + "░" * (20 - bar_width)
 
         if pct > 50:
             bar_style = _S.token_bold
@@ -694,7 +697,7 @@ def _render_daily_panel(
     week: WeeklyStats | None = None,
     last_week: WeeklyStats | None = None,
 ) -> None:
-    bw = _bar_width()
+    bar_width = 20 if _width_mode() == "compact" else 30
     lines = Text()
     lines.append("当日数据面板 (P90)\n\n", style="bold")
 
@@ -707,9 +710,9 @@ def _render_daily_panel(
     for label, current, limit, unit_fmt in p90_items:
         pct = min(current / limit * 100, 100) if limit > 0 else 0
         max_pct = max(max_pct, pct)
-        display_label = f"  {label}" + " " * (14 - len(label))
+        display_label = f"  {label}" + " " * (14 - _display_width(label))
         suffix = f"  {unit_fmt(current)} / {unit_fmt(limit)}"
-        _append_bar(lines, display_label, pct, bw, suffix)
+        _append_bar(lines, display_label, pct, bar_width, suffix)
         lines.append("\n")
 
     lines.append(f"  Token     {_fmt_tokens(today.total_tokens)}", style=_S.token)
@@ -762,14 +765,14 @@ def _render_active_block(
     remaining_h = remaining_min // 60
     remaining_m = remaining_min % 60
 
-    bw = _bar_width()
+    bar_width = 20 if _width_mode() == "compact" else 30
 
     lines = Text()
     lines.append("当前 5h&7d 数据面板\n\n", style="bold")
 
     if rate_limits and rate_limits.five_hour_pct is not None:
         _render_rate_bar(lines, "5h 限额", rate_limits.five_hour_pct,
-                         rate_limits.five_hour_resets_at, bw)
+                         rate_limits.five_hour_resets_at, bar_width)
 
     lines.append(f"  时间      ", style=_S.dim)
     lines.append(f"已用 {elapsed_min}min / 剩余 {remaining_h}h{remaining_m:02d}m\n", style=_S.dim)
@@ -788,7 +791,7 @@ def _render_active_block(
     if rate_limits and rate_limits.seven_day_pct is not None:
         lines.append("\n\n")
         _render_rate_bar(lines, "7d 限额", rate_limits.seven_day_pct,
-                         rate_limits.seven_day_resets_at, bw, "%m-%d %H:%M")
+                         rate_limits.seven_day_resets_at, bar_width, "%m-%d %H:%M")
         if week:
             _render_week_section(lines, week, last_week)
 
@@ -803,19 +806,19 @@ def _render_idle_panel(
     week: WeeklyStats | None = None,
     last_week: WeeklyStats | None = None,
 ) -> None:
-    bw = _bar_width()
+    bar_width = 20 if _width_mode() == "compact" else 30
     lines = Text()
     lines.append("限额数据面板\n\n", style="bold")
 
     if rate_limits.five_hour_pct is not None:
         _render_rate_bar(lines, "5h 限额", rate_limits.five_hour_pct,
-                         rate_limits.five_hour_resets_at, bw)
+                         rate_limits.five_hour_resets_at, bar_width)
 
     if rate_limits.seven_day_pct is not None:
         if rate_limits.five_hour_pct is not None:
             lines.append("\n")
         _render_rate_bar(lines, "7d 限额", rate_limits.seven_day_pct,
-                         rate_limits.seven_day_resets_at, bw, "%m-%d %H:%M")
+                         rate_limits.seven_day_resets_at, bar_width, "%m-%d %H:%M")
         if week:
             _render_week_section(lines, week, last_week)
 
