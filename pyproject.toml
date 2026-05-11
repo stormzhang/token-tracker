@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "token-tracker"
-version = "0.2.3"
+version = "0.2.4"
 description = "Track token usage across local AI agents (Claude Code, Codex)"
 requires-python = ">=3.11"
 dependencies = [
