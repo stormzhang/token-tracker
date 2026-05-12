@@ -10,7 +10,7 @@ CLAUDE_SETTINGS = os.path.expanduser("~/.claude/settings.json")
 HOOK_SCRIPT_PATH = os.path.expanduser("~/.claude/tt-statusline.py")
 CODEX_CONFIG = os.path.expanduser("~/.codex/config.toml")
 CODEX_BACKUP = os.path.expanduser("~/.codex/tt-backup.json")
-HOOK_VERSION = "1.1"
+HOOK_VERSION = "1.2"
 _BACKUP_KEY = "tokenTracker"
 _PREV_SL_KEY = "previousStatusLine"
 _SL_REGEX = re.compile(r'status_line\s*=\s*\[.*?\]', re.DOTALL)
@@ -25,8 +25,8 @@ CODEX_STATUS_LINE = [
 
 HOOK_SCRIPT = r'''#!/usr/bin/env python3
 """Claude Code statusLine — 状态栏显示 + 数据持久化到 tt-status.json"""
-__version__ = "1.1"
-import json, os, sys, tempfile
+__version__ = "1.2"
+import json, os, subprocess, sys, tempfile
 from datetime import datetime, timezone
 
 STATUS_FILE = os.path.expanduser("~/.claude/tt-status.json")
@@ -57,6 +57,48 @@ def progress_bar(value):
     return f"{color_by_pct(pct)}{filled_char * filled}{C['reset']}{empty_char * (width - filled)} {pct:.0f}%"
 
 
+def fmt_duration(seconds):
+    if seconds >= 86400:
+        d, rem = int(seconds // 86400), int(seconds % 86400)
+        return f"{d}d{rem // 3600}h"
+    if seconds >= 3600:
+        h, m = int(seconds // 3600), int((seconds % 3600) // 60)
+        return f"{h}h{m}m"
+    if seconds >= 60:
+        return f"{int(seconds // 60)}min"
+    return f"{int(seconds)}s"
+
+
+def load_prev():
+    try:
+        with open(STATUS_FILE) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def git_branch(cwd):
+    try:
+        branch = subprocess.check_output(
+            ["git", "branch", "--show-current"], cwd=cwd,
+            stderr=subprocess.DEVNULL, text=True, timeout=2,
+        ).strip()
+    except Exception:
+        return ""
+    if not branch:
+        return ""
+    try:
+        dirty = subprocess.check_output(
+            ["git", "status", "--porcelain", "--untracked-files=no"], cwd=cwd,
+            stderr=subprocess.DEVNULL, text=True, timeout=2,
+        ).strip()
+        if dirty:
+            branch += "*"
+    except Exception:
+        pass
+    return branch
+
+
 def save_data(data):
     data["_received_at"] = datetime.now(timezone.utc).isoformat()
     try:
@@ -68,49 +110,94 @@ def save_data(data):
         pass
 
 
-def render(data):
-    parts = []
+def render(data, prev):
+    now = datetime.now(timezone.utc)
+    ctx = data.get("context_window", {})
+    prev_ctx = prev.get("context_window", {})
+
+    # --- Line 1: Project | 5h | 7d | CTX ---
+    line1 = []
 
     project = data.get("workspace", {}).get("project_dir", "")
     if project:
-        parts.append(f"{C['cyan']}{os.path.basename(project)}{C['reset']}")
+        name = os.path.basename(project)
+        branch = git_branch(project)
+        if branch:
+            line1.append(f"{C['green']}{name}{C['reset']}({C['magenta']}{branch}{C['reset']})")
+        else:
+            line1.append(f"{C['green']}{name}{C['reset']}")
 
     rl = data.get("rate_limits", {})
-    has_rl = False
     for key, label in [("five_hour", "5h"), ("seven_day", "7d")]:
-        pct = rl.get(key, {}).get("used_percentage")
+        entry = rl.get(key, {})
+        pct = entry.get("used_percentage")
         if pct is not None:
-            has_rl = True
-            parts.append(f"{C['blue']}{label}:{C['reset']}{progress_bar(pct)}")
+            reset_str = ""
+            resets_at = entry.get("resets_at")
+            if resets_at:
+                remain = int(resets_at) - int(now.timestamp())
+                if remain > 0:
+                    reset_str = f" {C['dim']}({fmt_duration(remain)}){C['reset']}"
+            line1.append(f"{C['blue']}{label}:{C['reset']}{progress_bar(pct)}{reset_str}")
 
-    if not has_rl:
-        cost = data.get("cost", {})
-        usd = cost.get("total_cost_usd")
-        if usd is not None:
-            parts.append(f"{C['blue']}Cost:{C['reset']}{C['peach']}${usd:.2f}{C['reset']}")
-
-    ctx = data.get("context_window", {})
     if ctx.get("used_percentage") is not None:
         size = ctx.get("context_window_size", 0)
-        pct = ctx["used_percentage"]
-        cc = C["green"] if pct < 40 else C["yellow"] if pct < 60 else C["red"]
-        parts.append(f"{cc}{fmt_tokens(size)} CTX: {pct:.0f}%{C['reset']}")
+        line1.append(f"{C['blue']}{fmt_tokens(size)} Context:{C['reset']}{progress_bar(ctx['used_percentage'])}")
+
+    # --- Line 2: Tokens + Cache + Cost ---
+    line2 = []
 
     total_in = ctx.get("total_input_tokens", 0)
     total_out = ctx.get("total_output_tokens", 0)
-    cache = (ctx.get("current_usage") or {}).get("cache_read_input_tokens", 0)
     if total_in or total_out:
-        parts.append(f"{C['peach']}Tokens: {fmt_tokens(total_in)}↑ {fmt_tokens(total_out)}↓ cached:{fmt_tokens(cache)}{C['reset']}")
+        prev_in = prev_ctx.get("total_input_tokens", 0)
+        prev_out = prev_ctx.get("total_output_tokens", 0)
+        delta_in = total_in - prev_in if total_in > prev_in else 0
+        delta_out = total_out - prev_out if total_out > prev_out else 0
+        tok = f"{C['peach']}会话总 Tokens: in {fmt_tokens(total_in)}, out {fmt_tokens(total_out)}"
+        tok += f" {C['dim']}(上轮: +{fmt_tokens(delta_in)} +{fmt_tokens(delta_out)})"
+        tok += C['reset']
+        line2.append(tok)
+
+    total_cache = data.get("_total_cache_read", 0)
+    if total_in > 0 and total_cache > 0:
+        cache_pct = min(total_cache / total_in * 100, 100)
+        cc = C["cyan"]
+        line2.append(f"{cc}Cache 命中:{cache_pct:.0f}%{C['reset']}")
+
+    cost = data.get("cost", {})
+    usd = cost.get("total_cost_usd")
+    if usd is not None:
+        line2.append(f"{C['blue']}Cost: ${usd:.2f}{C['reset']}")
+
+    # --- Line 3: Duration + Model ---
+    line3 = []
+
+    session_start = data.get("_session_start", "")
+    if session_start:
+        try:
+            elapsed = (now - datetime.fromisoformat(session_start)).total_seconds()
+            if elapsed >= 30:
+                line3.append(f"{C['dim']}{C['magenta']}会话时长: {fmt_duration(elapsed)}{C['reset']}")
+        except Exception:
+            pass
 
     model_name = data.get("model", {}).get("display_name", "")
     if model_name:
         effort = data.get("effort", {}).get("level", "")
         if effort:
-            model_name += f"{C['dim']}/{effort}{C['reset']}"
-        parts.append(f"{C['magenta']}{model_name}{C['reset']}")
+            model_name += f"/{effort}"
+        line3.append(f"{C['dim']}{C['magenta']}{model_name}{C['reset']}")
 
-    if parts:
-        print(" | ".join(parts))
+    output = []
+    if line1:
+        output.append(" | ".join(line1))
+    if line2:
+        output.append(" | ".join(line2))
+    if line3:
+        output.append(" | ".join(line3))
+    if output:
+        print("\n".join(output))
 
 
 def main():
@@ -121,8 +208,33 @@ def main():
         data = json.loads(raw)
     except Exception:
         return
+
+    prev = load_prev()
+    now = datetime.now(timezone.utc).isoformat()
+
+    ctx = data.get("context_window", {})
+    prev_ctx = prev.get("context_window", {})
+    curr_total = ctx.get("total_input_tokens", 0)
+    prev_total = prev_ctx.get("total_input_tokens", 0)
+    new_session = curr_total < prev_total or "_session_start" not in prev
+
+    data["_session_start"] = now if new_session else prev.get("_session_start", now)
+
+    curr_usage = (ctx.get("current_usage") or {})
+    curr_cache = curr_usage.get("cache_read_input_tokens", 0)
+    prev_last_cache = prev.get("_prev_turn_cache", -1)
+    prev_total_cache = prev.get("_total_cache_read", 0)
+
+    if new_session:
+        data["_total_cache_read"] = curr_cache
+    elif curr_cache != prev_last_cache:
+        data["_total_cache_read"] = prev_total_cache + curr_cache
+    else:
+        data["_total_cache_read"] = prev_total_cache
+    data["_prev_turn_cache"] = curr_cache
+
     save_data(data)
-    render(data)
+    render(data, prev)
 
 
 if __name__ == "__main__":
