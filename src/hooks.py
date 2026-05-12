@@ -310,10 +310,14 @@ def _installed_hook_version() -> str | None:
 
 
 def needs_update() -> bool:
+    if not os.path.isdir(os.path.dirname(HOOK_SCRIPT_PATH)):
+        return False
     return _installed_hook_version() != HOOK_VERSION
 
 
 def update_hook() -> None:
+    if not os.path.isdir(os.path.dirname(HOOK_SCRIPT_PATH)):
+        return
     with open(HOOK_SCRIPT_PATH, "w", encoding="utf-8") as f:
         f.write(HOOK_SCRIPT)
     os.chmod(HOOK_SCRIPT_PATH, os.stat(HOOK_SCRIPT_PATH).st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
