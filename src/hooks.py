@@ -145,14 +145,14 @@ def render(data, now):
     total_in = ctx.get("total_input_tokens", 0)
     total_out = ctx.get("total_output_tokens", 0)
     curr_usage = (ctx.get("current_usage") or {})
-    turn_in = curr_usage.get("input_tokens", 0)
+    turn_in_total = curr_usage.get("input_tokens", 0) + curr_usage.get("cache_creation_input_tokens", 0)
     turn_out = curr_usage.get("output_tokens", 0)
-    cache_read = curr_usage.get("cache_read_input_tokens", 0)
     if total_in or total_out:
         tok = f"{C['peach']}Tokens: in {fmt_tokens(total_in)}, out {fmt_tokens(total_out)}"
-        tok += f" {C['dim']}(本轮: in {fmt_tokens(turn_in)}, out {fmt_tokens(turn_out)})"
+        tok += f" {C['dim']}(本轮: in {fmt_tokens(turn_in_total)}, out {fmt_tokens(turn_out)})"
         tok += C['reset']
         line2.append(tok)
+    cache_read = curr_usage.get("cache_read_input_tokens", 0)
     if cache_read > 0:
         line2.append(f"{C['cyan']}Cached: {fmt_tokens(cache_read)}{C['reset']}")
 
