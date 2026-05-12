@@ -77,7 +77,11 @@ def load_prev():
         return {}
 
 
-def git_branch(cwd):
+def git_branch(cwd, prev):
+    cached = prev.get("_git_branch", "")
+    cached_ts = prev.get("_git_branch_ts", 0)
+    if cached_ts and (datetime.now(timezone.utc).timestamp() - cached_ts) < 30:
+        return cached
     try:
         branch = subprocess.check_output(
             ["git", "branch", "--show-current"], cwd=cwd,
@@ -101,17 +105,21 @@ def git_branch(cwd):
 
 def save_data(data):
     data["_received_at"] = datetime.now(timezone.utc).isoformat()
+    tmp = None
     try:
         fd, tmp = tempfile.mkstemp(dir=os.path.dirname(STATUS_FILE), suffix=".tmp")
         with os.fdopen(fd, "w") as f:
             json.dump(data, f)
         os.replace(tmp, STATUS_FILE)
     except OSError:
-        pass
+        if tmp:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
 
 
-def render(data, prev):
-    now = datetime.now(timezone.utc)
+def render(data, prev, now):
     ctx = data.get("context_window", {})
     prev_ctx = prev.get("context_window", {})
 
@@ -121,7 +129,7 @@ def render(data, prev):
     project = data.get("workspace", {}).get("project_dir", "")
     if project:
         name = os.path.basename(project)
-        branch = git_branch(project)
+        branch = data.get("_git_branch", "")
         if branch:
             line1.append(f"{C['green']}{name}{C['reset']}({C['magenta']}{branch}{C['reset']})")
         else:
@@ -152,10 +160,10 @@ def render(data, prev):
     if total_in or total_out:
         prev_in = prev_ctx.get("total_input_tokens", 0)
         prev_out = prev_ctx.get("total_output_tokens", 0)
-        delta_in = total_in - prev_in if total_in > prev_in else 0
-        delta_out = total_out - prev_out if total_out > prev_out else 0
+        delta_in = max(total_in - prev_in, 0)
+        delta_out = max(total_out - prev_out, 0)
         tok = f"{C['peach']}会话总 Tokens: in {fmt_tokens(total_in)}, out {fmt_tokens(total_out)}"
-        tok += f" {C['dim']}(上轮: +{fmt_tokens(delta_in)} +{fmt_tokens(delta_out)})"
+        tok += f" {C['dim']}(上轮: +{fmt_tokens(delta_in)}↑ +{fmt_tokens(delta_out)}↓)"
         tok += C['reset']
         line2.append(tok)
 
@@ -210,7 +218,8 @@ def main():
         return
 
     prev = load_prev()
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(timezone.utc)
+    now_iso = now.isoformat()
 
     ctx = data.get("context_window", {})
     prev_ctx = prev.get("context_window", {})
@@ -218,10 +227,11 @@ def main():
     prev_total = prev_ctx.get("total_input_tokens", 0)
     new_session = curr_total < prev_total or "_session_start" not in prev
 
-    data["_session_start"] = now if new_session else prev.get("_session_start", now)
+    data["_session_start"] = now_iso if new_session else prev.get("_session_start", now_iso)
 
     curr_usage = (ctx.get("current_usage") or {})
     curr_cache = curr_usage.get("cache_read_input_tokens", 0)
+    # -1: 首次运行时确保 != curr_cache，触发累加
     prev_last_cache = prev.get("_prev_turn_cache", -1)
     prev_total_cache = prev.get("_total_cache_read", 0)
 
@@ -233,8 +243,14 @@ def main():
         data["_total_cache_read"] = prev_total_cache
     data["_prev_turn_cache"] = curr_cache
 
+    project = data.get("workspace", {}).get("project_dir", "")
+    if project:
+        branch = git_branch(project, prev)
+        data["_git_branch"] = branch
+        data["_git_branch_ts"] = now.timestamp()
+
     save_data(data)
-    render(data, prev)
+    render(data, prev, now)
 
 
 if __name__ == "__main__":
@@ -330,9 +346,7 @@ def setup(auto: bool = False) -> None:
 
 
 def _setup_claude() -> None:
-    with open(HOOK_SCRIPT_PATH, "w", encoding="utf-8") as f:
-        f.write(HOOK_SCRIPT)
-    os.chmod(HOOK_SCRIPT_PATH, os.stat(HOOK_SCRIPT_PATH).st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    update_hook()
 
     settings: dict = {}
     if os.path.exists(CLAUDE_SETTINGS):
