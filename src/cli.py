@@ -15,6 +15,55 @@ AGENT_ALIASES = {"claude": "claude-code", "codex": "codex"}
 AGENT_LOADERS = {"claude-code": claude, "codex": codex}
 RATE_LIMIT_LOADERS = {"claude-code": load_claude_rate_limits, "codex": codex.load_rate_limits}
 
+SORT_KEYS = {
+    "tokens": ("total_tokens", True),
+    "cost": ("cost_usd", True),
+    "messages": ("message_count", True),
+    "sessions": ("session_count", True),
+    "time": None,  # handled per-command
+    "input": ("input_tokens", True),
+    "output": ("output_tokens", True),
+}
+
+
+def _parse_sort_args(args: list[str]) -> tuple[list[str], str | None, bool]:
+    """Extract --sort KEY and --asc from args, return (remaining, sort_key, descending)."""
+    remaining = []
+    sort_key = None
+    descending = True
+    i = 0
+    while i < len(args):
+        if args[i] == "--sort" and i + 1 < len(args):
+            sort_key = args[i + 1].lower()
+            i += 2
+        elif args[i] == "--asc":
+            descending = False
+            i += 1
+        elif args[i] == "--desc":
+            descending = True
+            i += 1
+        else:
+            remaining.append(args[i])
+            i += 1
+    return remaining, sort_key, descending
+
+
+def _apply_sort(stats, sort_key: str | None, descending: bool, default_attr: str, default_reverse: bool):
+    if sort_key is None:
+        stats.sort(key=lambda s: getattr(s, default_attr), reverse=default_reverse)
+        return
+    if sort_key not in SORT_KEYS:
+        valid = ", ".join(SORT_KEYS.keys())
+        console.print(f"[yellow]未知排序字段: {sort_key}，可用: {valid}[/yellow]")
+        stats.sort(key=lambda s: getattr(s, default_attr), reverse=default_reverse)
+        return
+    mapping = SORT_KEYS[sort_key]
+    if mapping is None:
+        stats.sort(key=lambda s: getattr(s, default_attr), reverse=descending)
+    else:
+        attr, _ = mapping
+        stats.sort(key=lambda s: getattr(s, attr), reverse=descending)
+
 
 def _load_entries(agent_id: str, hours_back: int = 0):
     loader = AGENT_LOADERS.get(agent_id)
@@ -91,6 +140,14 @@ def _fit_screen(text: str, height: int, scroll_offset: int) -> tuple[str, int]:
     return "\n".join(visible), max_scroll
 
 
+_DASHBOARD_SORT_CYCLE = [
+    ("time", "start_time", "时间"),
+    ("tokens", "total_tokens", "Token"),
+    ("cost", "cost_usd", "等效成本"),
+    ("messages", "message_count", "消息数"),
+]
+
+
 def _show_interactive_dashboard(agents):
     import tty
     import termios
@@ -102,6 +159,9 @@ def _show_interactive_dashboard(agents):
     agent_names = [a.name for a in agents]
     current = _initial_agent_index(agents)
     scroll_offset = 0
+    sort_idx = 0
+    sort_desc = True
+    session_limit = 30
     orig = _tables.console
 
     sys.stdout.write("\033[?1049h\033[?7l\033[2J\033[3J\033[H\033[?25l")
@@ -119,14 +179,28 @@ def _show_interactive_dashboard(agents):
             width = size.columns
             height = size.lines
 
+            data = cache[agent.id]
+            if data:
+                _, sort_attr, sort_label = _DASHBOARD_SORT_CYCLE[sort_idx]
+                sorted_sessions = sorted(
+                    data["sessions"],
+                    key=lambda s: getattr(s, sort_attr),
+                    reverse=sort_desc,
+                )
+                arrow = "↓" if sort_desc else "↑"
+                session_title = f"最近会话({session_limit})  [dim](s)排序:[/dim] {sort_label}{arrow}  [dim](r)反转  (+/-)条数[/dim]"
+            else:
+                sorted_sessions = []
+                session_title = None
+
             buf = StringIO()
             _tables.console = RichConsole(
                 file=buf, width=width, force_terminal=True,
             )
             render_tab_bar(agent_names, current)
-            data = cache[agent.id]
             if data:
-                render_dashboard(**data, session_limit=10, top_margin=False)
+                render_data = {**data, "sessions": sorted_sessions}
+                render_dashboard(**render_data, session_limit=session_limit, top_margin=False, session_title=session_title)
             else:
                 _tables.console.print(f"[yellow]暂无数据[/yellow]")
             _tables.console = orig
@@ -150,6 +224,15 @@ def _show_interactive_dashboard(agents):
                 scroll_offset = max(0, scroll_offset - max(1, height - 3))
             elif key == "page_down":
                 scroll_offset = min(max_scroll, scroll_offset + max(1, height - 3))
+            elif key == "sort":
+                sort_idx = (sort_idx + 1) % len(_DASHBOARD_SORT_CYCLE)
+                scroll_offset = 0
+            elif key == "reverse":
+                sort_desc = not sort_desc
+            elif key == "more":
+                session_limit += 10
+            elif key == "less":
+                session_limit = max(10, session_limit - 10)
             elif key == "quit":
                 break
     finally:
@@ -197,6 +280,14 @@ def _read_key(tty, termios):
             return "page_up"
         if ch == b"f":
             return "page_down"
+        if ch == b"s":
+            return "sort"
+        if ch == b"r":
+            return "reverse"
+        if ch in (b"+", b"="):
+            return "more"
+        if ch in (b"-", b"_"):
+            return "less"
         if ch in (b"q", b"Q", b"\x03"):
             return "quit"
         return "other"
@@ -263,28 +354,34 @@ def main():
 
     # 其他命令使用合并数据
     agent_names = [a.name for a in agents]
+    rest_args, sort_key, sort_desc = _parse_sort_args(args[1:])
 
     if command == "daily":
         stats = _aggregate_per_agent(agents, aggregate_daily)
-        stats.sort(key=lambda s: s.total_tokens, reverse=True)
+        default_attr = "date" if sort_key == "time" else "total_tokens"
+        _apply_sort(stats, sort_key, sort_desc, default_attr, default_reverse=True)
         render_daily(stats, agents=agent_names)
     elif command == "weekly":
         stats = _aggregate_per_agent(agents, aggregate_weekly)
-        stats.sort(key=lambda s: s.week, reverse=True)
+        default_attr = "week" if sort_key == "time" else "week"
+        _apply_sort(stats, sort_key, sort_desc, default_attr, default_reverse=True)
         render_weekly(stats, agents=agent_names)
     elif command == "monthly":
         stats = _aggregate_per_agent(agents, aggregate_monthly)
-        stats.sort(key=lambda s: s.month)
+        default_attr = "month" if sort_key == "time" else "month"
+        _apply_sort(stats, sort_key, sort_desc, default_attr, default_reverse=False)
         render_monthly(stats, agents=agent_names)
     elif command == "sessions":
         limit = 20
-        if len(args) > 1:
+        for a in rest_args:
             try:
-                limit = int(args[1])
+                limit = int(a)
+                break
             except ValueError:
                 pass
         stats = _aggregate_per_agent(agents, aggregate_sessions)
-        stats.sort(key=lambda s: s.start_time, reverse=True)
+        default_attr = "start_time" if sort_key == "time" else "start_time"
+        _apply_sort(stats, sort_key, sort_desc, default_attr, default_reverse=True)
         render_sessions(stats, limit)
     else:
         console.print(f"[red]未知命令: {command}[/red]")
