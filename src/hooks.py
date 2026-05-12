@@ -98,7 +98,7 @@ def render(data):
 
     total_in = ctx.get("total_input_tokens", 0)
     total_out = ctx.get("total_output_tokens", 0)
-    cache = ctx.get("current_usage", {}).get("cache_read_input_tokens", 0)
+    cache = (ctx.get("current_usage") or {}).get("cache_read_input_tokens", 0)
     if total_in or total_out:
         parts.append(f"{C['peach']}Tokens: {fmt_tokens(total_in)}↑ {fmt_tokens(total_out)}↓ cached:{fmt_tokens(cache)}{C['reset']}")
 

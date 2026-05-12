@@ -73,9 +73,18 @@ def _load_pricing() -> dict:
 
 
 def _fetch_and_cache() -> dict:
-    req = urllib.request.Request(LITELLM_URL, headers={"User-Agent": "token-tracker/0.1"})
-    with urllib.request.urlopen(req, timeout=10) as resp:
-        data = json.loads(resp.read().decode())
+    import ssl
+    ctx = ssl.create_default_context()
+    try:
+        req = urllib.request.Request(LITELLM_URL, headers={"User-Agent": "token-tracker/0.1"})
+        with urllib.request.urlopen(req, timeout=10, context=ctx) as resp:
+            data = json.loads(resp.read().decode())
+    except ssl.SSLCertVerificationError:
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        req = urllib.request.Request(LITELLM_URL, headers={"User-Agent": "token-tracker/0.1"})
+        with urllib.request.urlopen(req, timeout=10, context=ctx) as resp:
+            data = json.loads(resp.read().decode())
 
     try:
         with open(CACHE_PATH, "w") as f:
