@@ -69,19 +69,7 @@ def fmt_duration(seconds):
     return f"{int(seconds)}s"
 
 
-def load_prev():
-    try:
-        with open(STATUS_FILE) as f:
-            return json.load(f)
-    except Exception:
-        return {}
-
-
-def git_branch(cwd, prev):
-    cached = prev.get("_git_branch", "")
-    cached_ts = prev.get("_git_branch_ts", 0)
-    if cached_ts and (datetime.now(timezone.utc).timestamp() - cached_ts) < 30:
-        return cached
+def git_branch(cwd):
     try:
         branch = subprocess.check_output(
             ["git", "branch", "--show-current"], cwd=cwd,
@@ -103,8 +91,8 @@ def git_branch(cwd, prev):
     return branch
 
 
-def save_data(data):
-    data["_received_at"] = datetime.now(timezone.utc).isoformat()
+def save_data(data, now):
+    data["_received_at"] = now.isoformat()
     tmp = None
     try:
         fd, tmp = tempfile.mkstemp(dir=os.path.dirname(STATUS_FILE), suffix=".tmp")
@@ -119,25 +107,24 @@ def save_data(data):
                 pass
 
 
-def render(data, prev, now):
-    ctx = data.get("context_window", {})
-    prev_ctx = prev.get("context_window", {})
+def render(data, now):
+    ctx = data.get("context_window") or {}
 
     # --- Line 1: Project | 5h | 7d | CTX ---
     line1 = []
 
-    project = data.get("workspace", {}).get("project_dir", "")
+    project = (data.get("workspace") or {}).get("project_dir", "")
     if project:
         name = os.path.basename(project)
-        branch = data.get("_git_branch", "")
+        branch = git_branch(project)
         if branch:
             line1.append(f"{C['green']}{name}{C['reset']}({C['magenta']}{branch}{C['reset']})")
         else:
             line1.append(f"{C['green']}{name}{C['reset']}")
 
-    rl = data.get("rate_limits", {})
+    rl = data.get("rate_limits") or {}
     for key, label in [("five_hour", "5h"), ("seven_day", "7d")]:
-        entry = rl.get(key, {})
+        entry = rl.get(key) or {}
         pct = entry.get("used_percentage")
         if pct is not None:
             reset_str = ""
@@ -157,53 +144,40 @@ def render(data, prev, now):
 
     total_in = ctx.get("total_input_tokens", 0)
     total_out = ctx.get("total_output_tokens", 0)
+    curr_usage = (ctx.get("current_usage") or {})
+    turn_in = curr_usage.get("input_tokens", 0)
+    turn_out = curr_usage.get("output_tokens", 0)
+    cache_read = curr_usage.get("cache_read_input_tokens", 0)
     if total_in or total_out:
-        prev_in = prev_ctx.get("total_input_tokens", 0)
-        prev_out = prev_ctx.get("total_output_tokens", 0)
-        delta_in = max(total_in - prev_in, 0)
-        delta_out = max(total_out - prev_out, 0)
-        tok = f"{C['peach']}会话总 Tokens: in {fmt_tokens(total_in)}, out {fmt_tokens(total_out)}"
-        tok += f" {C['dim']}(上轮: +{fmt_tokens(delta_in)}↑ +{fmt_tokens(delta_out)}↓)"
+        tok = f"{C['peach']}Tokens: in {fmt_tokens(total_in)}, out {fmt_tokens(total_out)}"
+        tok += f" {C['dim']}(本轮: in {fmt_tokens(turn_in)}, out {fmt_tokens(turn_out)})"
         tok += C['reset']
         line2.append(tok)
+    if cache_read > 0:
+        line2.append(f"{C['cyan']}Cached: {fmt_tokens(cache_read)}{C['reset']}")
 
-    total_cache = data.get("_total_cache_read", 0)
-    if total_in > 0 and total_cache > 0:
-        cache_pct = min(total_cache / total_in * 100, 100)
-        cc = C["cyan"]
-        line2.append(f"{cc}Cache 命中:{cache_pct:.0f}%{C['reset']}")
-
-    cost = data.get("cost", {})
+    cost = data.get("cost") or {}
     usd = cost.get("total_cost_usd")
     if usd is not None:
-        line2.append(f"{C['blue']}Cost: ${usd:.2f}{C['reset']}")
+        line2.append(f"{C['magenta']}Cost: ${usd:.2f}{C['reset']}")
 
     # --- Line 3: Duration + Model ---
     line3 = []
 
-    session_start = data.get("_session_start", "")
-    if session_start:
-        try:
-            elapsed = (now - datetime.fromisoformat(session_start)).total_seconds()
-            if elapsed >= 30:
-                line3.append(f"{C['dim']}{C['magenta']}会话时长: {fmt_duration(elapsed)}{C['reset']}")
-        except Exception:
-            pass
+    duration_ms = cost.get("total_duration_ms")
+    if duration_ms and duration_ms > 0:
+        line3.append(f"{C['dim']}{C['magenta']}会话时长: {fmt_duration(duration_ms / 1000)}{C['reset']}")
 
-    model_name = data.get("model", {}).get("display_name", "")
+    model_name = (data.get("model") or {}).get("display_name", "")
     if model_name:
-        effort = data.get("effort", {}).get("level", "")
+        effort = (data.get("effort") or {}).get("level", "")
         if effort:
             model_name += f"/{effort}"
+        fast = data.get("fast_mode")
+        model_name += f"/{'fast' if fast else 'nofast'}"
         line3.append(f"{C['dim']}{C['magenta']}{model_name}{C['reset']}")
 
-    output = []
-    if line1:
-        output.append(" | ".join(line1))
-    if line2:
-        output.append(" | ".join(line2))
-    if line3:
-        output.append(" | ".join(line3))
+    output = [" | ".join(line) for line in (line1, line2, line3) if line]
     if output:
         print("\n".join(output))
 
@@ -217,40 +191,9 @@ def main():
     except Exception:
         return
 
-    prev = load_prev()
     now = datetime.now(timezone.utc)
-    now_iso = now.isoformat()
-
-    ctx = data.get("context_window", {})
-    prev_ctx = prev.get("context_window", {})
-    curr_total = ctx.get("total_input_tokens", 0)
-    prev_total = prev_ctx.get("total_input_tokens", 0)
-    new_session = curr_total < prev_total or "_session_start" not in prev
-
-    data["_session_start"] = now_iso if new_session else prev.get("_session_start", now_iso)
-
-    curr_usage = (ctx.get("current_usage") or {})
-    curr_cache = curr_usage.get("cache_read_input_tokens", 0)
-    # -1: 首次运行时确保 != curr_cache，触发累加
-    prev_last_cache = prev.get("_prev_turn_cache", -1)
-    prev_total_cache = prev.get("_total_cache_read", 0)
-
-    if new_session:
-        data["_total_cache_read"] = curr_cache
-    elif curr_cache != prev_last_cache:
-        data["_total_cache_read"] = prev_total_cache + curr_cache
-    else:
-        data["_total_cache_read"] = prev_total_cache
-    data["_prev_turn_cache"] = curr_cache
-
-    project = data.get("workspace", {}).get("project_dir", "")
-    if project:
-        branch = git_branch(project, prev)
-        data["_git_branch"] = branch
-        data["_git_branch_ts"] = now.timestamp()
-
-    save_data(data)
-    render(data, prev, now)
+    save_data(data, now)
+    render(data, now)
 
 
 if __name__ == "__main__":
