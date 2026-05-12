@@ -10,7 +10,7 @@ CLAUDE_SETTINGS = os.path.expanduser("~/.claude/settings.json")
 HOOK_SCRIPT_PATH = os.path.expanduser("~/.claude/tt-statusline.py")
 CODEX_CONFIG = os.path.expanduser("~/.codex/config.toml")
 CODEX_BACKUP = os.path.expanduser("~/.codex/tt-backup.json")
-HOOK_VERSION = "1.1"
+HOOK_VERSION = "1.2"
 _BACKUP_KEY = "tokenTracker"
 _PREV_SL_KEY = "previousStatusLine"
 _SL_REGEX = re.compile(r'status_line\s*=\s*\[.*?\]', re.DOTALL)
@@ -25,8 +25,8 @@ CODEX_STATUS_LINE = [
 
 HOOK_SCRIPT = r'''#!/usr/bin/env python3
 """Claude Code statusLine — 状态栏显示 + 数据持久化到 tt-status.json"""
-__version__ = "1.1"
-import json, os, sys, tempfile
+__version__ = "1.2"
+import json, os, subprocess, sys, tempfile
 from datetime import datetime, timezone
 
 STATUS_FILE = os.path.expanduser("~/.claude/tt-status.json")
@@ -57,6 +57,29 @@ def progress_bar(value):
     return f"{color_by_pct(pct)}{filled_char * filled}{C['reset']}{empty_char * (width - filled)} {pct:.0f}%"
 
 
+def git_status(cwd):
+    if not cwd or not os.path.isdir(os.path.join(cwd, ".git")):
+        return ""
+    try:
+        branch = subprocess.check_output(
+            ["git", "branch", "--show-current"], cwd=cwd,
+            stderr=subprocess.DEVNULL, text=True, timeout=2,
+        ).strip()
+    except Exception:
+        return ""
+    dirty = ""
+    try:
+        porcelain = subprocess.check_output(
+            ["git", "status", "--porcelain", "--untracked-files=no"], cwd=cwd,
+            stderr=subprocess.DEVNULL, text=True, timeout=2,
+        ).strip()
+        if porcelain:
+            dirty = "*"
+    except Exception:
+        pass
+    return f"{C['magenta']}{branch}{dirty}{C['reset']}" if branch else ""
+
+
 def save_data(data):
     data["_received_at"] = datetime.now(timezone.utc).isoformat()
     try:
@@ -71,24 +94,30 @@ def save_data(data):
 def render(data):
     parts = []
 
+    # Project + Git
     project = data.get("workspace", {}).get("project_dir", "")
     if project:
-        parts.append(f"{C['cyan']}{os.path.basename(project)}{C['reset']}")
+        name = os.path.basename(project)
+        gs = git_status(data.get("workspace", {}).get("current_dir", project))
+        if gs:
+            parts.append(f"{C['cyan']}{name}{C['reset']} git:({gs})")
+        else:
+            parts.append(f"{C['cyan']}{name}{C['reset']}")
 
+    # Rate limits
     rl = data.get("rate_limits", {})
-    has_rl = False
     for key, label in [("five_hour", "5h"), ("seven_day", "7d")]:
         pct = rl.get(key, {}).get("used_percentage")
         if pct is not None:
-            has_rl = True
             parts.append(f"{C['blue']}{label}:{C['reset']}{progress_bar(pct)}")
 
-    if not has_rl:
-        cost = data.get("cost", {})
-        usd = cost.get("total_cost_usd")
-        if usd is not None:
-            parts.append(f"{C['blue']}Cost:{C['reset']}{C['peach']}${usd:.2f}{C['reset']}")
+    # Cost (always show if available)
+    cost = data.get("cost", {})
+    usd = cost.get("total_cost_usd")
+    if usd is not None:
+        parts.append(f"{C['blue']}Cost:{C['reset']}{C['peach']}${usd:.2f}{C['reset']}")
 
+    # Context
     ctx = data.get("context_window", {})
     if ctx.get("used_percentage") is not None:
         size = ctx.get("context_window_size", 0)
@@ -98,10 +127,11 @@ def render(data):
 
     total_in = ctx.get("total_input_tokens", 0)
     total_out = ctx.get("total_output_tokens", 0)
-    cache = ctx.get("current_usage", {}).get("cache_read_input_tokens", 0)
+    cache = (ctx.get("current_usage") or {}).get("cache_read_input_tokens", 0)
     if total_in or total_out:
         parts.append(f"{C['peach']}Tokens: {fmt_tokens(total_in)}↑ {fmt_tokens(total_out)}↓ cached:{fmt_tokens(cache)}{C['reset']}")
 
+    # Model
     model_name = data.get("model", {}).get("display_name", "")
     if model_name:
         effort = data.get("effort", {}).get("level", "")
@@ -232,7 +262,7 @@ def _setup_claude() -> None:
         console.print(f"[yellow]检测到已有 statusLine，备份后替换[/yellow]")
         settings.setdefault(_BACKUP_KEY, {})[_PREV_SL_KEY] = existing
 
-    settings["statusLine"] = {"type": "command", "command": HOOK_SCRIPT_PATH}
+    settings["statusLine"] = {"type": "command", "command": HOOK_SCRIPT_PATH, "refreshInterval": 5}
 
     with open(CLAUDE_SETTINGS, "w", encoding="utf-8") as f:
         json.dump(settings, f, indent=2, ensure_ascii=False)
