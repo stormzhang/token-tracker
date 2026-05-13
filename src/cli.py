@@ -255,7 +255,7 @@ def main():
                 console.print(f"[red]未检测到 {agent_filter}[/red]")
                 sys.exit(1)
             _show_agent_dashboard(agent_id)
-        elif len(agents) > 1 and sys.stdin.isatty():
+        elif len(agents) > 1 and sys.stdin.isatty() and sys.platform != "win32":
             _show_interactive_dashboard(agents)
         else:
             _show_agent_dashboard(agents[0].id)
