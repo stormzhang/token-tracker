@@ -92,8 +92,6 @@ def _fit_screen(text: str, height: int, scroll_offset: int) -> tuple[str, int]:
 
 
 def _show_interactive_dashboard(agents):
-    import tty
-    import termios
     import shutil
     from io import StringIO
     from rich.console import Console as RichConsole
@@ -135,7 +133,7 @@ def _show_interactive_dashboard(agents):
             sys.stdout.write("\033[2J\033[3J\033[H" + screen)
             sys.stdout.flush()
 
-            key = _read_key(tty, termios)
+            key = _read_key()
             if key == "left":
                 current = (current - 1) % len(agents)
                 scroll_offset = 0
@@ -158,9 +156,11 @@ def _show_interactive_dashboard(agents):
         _tables.console = orig
 
 
-def _read_key(tty, termios):
+def _read_key_unix():
     import os as _os
     import select
+    import tty
+    import termios
     fd = sys.stdin.fileno()
     old = termios.tcgetattr(fd)
     try:
@@ -202,6 +202,44 @@ def _read_key(tty, termios):
         return "other"
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
+
+
+def _read_key_win():
+    import msvcrt
+    ch = msvcrt.getch()
+    if ch in (b"\xe0", b"\x00"):
+        ch2 = msvcrt.getch()
+        if ch2 == b"K":
+            return "left"
+        if ch2 == b"M":
+            return "right"
+        if ch2 == b"H":
+            return "up"
+        if ch2 == b"P":
+            return "down"
+        if ch2 == b"I":
+            return "page_up"
+        if ch2 == b"Q":
+            return "page_down"
+        return "other"
+    if ch == b"h":
+        return "left"
+    if ch == b"l":
+        return "right"
+    if ch == b"k":
+        return "up"
+    if ch == b"j":
+        return "down"
+    if ch == b"b":
+        return "page_up"
+    if ch == b"f":
+        return "page_down"
+    if ch in (b"q", b"Q", b"\x03", b"\x1b"):
+        return "quit"
+    return "other"
+
+
+_read_key = _read_key_win if sys.platform == "win32" else _read_key_unix
 
 
 def _get_version() -> str:
@@ -255,7 +293,7 @@ def main():
                 console.print(f"[red]未检测到 {agent_filter}[/red]")
                 sys.exit(1)
             _show_agent_dashboard(agent_id)
-        elif len(agents) > 1 and sys.stdin.isatty() and sys.platform != "win32":
+        elif len(agents) > 1 and sys.stdin.isatty():
             _show_interactive_dashboard(agents)
         else:
             _show_agent_dashboard(agents[0].id)
