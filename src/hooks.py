@@ -2,6 +2,7 @@ import json
 import os
 import re
 import stat
+import sys
 import tomllib
 
 from .ui.tables import console
@@ -37,6 +38,10 @@ C = {
     "peach": "\033[38;5;216m", "dim": "\033[2m", "reset": "\033[0m",
 }
 
+# Windows GBK workaround
+if sys.platform == 'win32':
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+
 
 def vlen(s):
     return len(ANSI_RE.sub("", s))
@@ -47,8 +52,8 @@ def get_width():
         return max(1, os.get_terminal_size(2).columns - 4)
     except Exception:
         pass
-    import fcntl, struct, termios
     try:
+        import fcntl, struct, termios
         with open('/dev/tty', 'r') as tty:
             res = fcntl.ioctl(tty, termios.TIOCGWINSZ, b'\x00' * 8)
             return max(1, struct.unpack('hh', res[:4])[1] - 4)
@@ -237,6 +242,7 @@ def render(data, now):
     output = [" | ".join(line) for line in (line1, line2, line3) if line]
     if output:
         print("\n".join(output))
+        sys.stdout.flush()
 
 
 def main():
@@ -363,6 +369,8 @@ def _setup_claude() -> None:
         settings.setdefault(_BACKUP_KEY, {})[_PREV_SL_KEY] = existing
 
     settings["statusLine"] = {"type": "command", "command": f"python3 {HOOK_SCRIPT_PATH}"}
+    if sys.platform == 'win32':
+        settings["statusLine"]["command"] = f"{sys.executable} {HOOK_SCRIPT_PATH}"
 
     with open(CLAUDE_SETTINGS, "w", encoding="utf-8") as f:
         json.dump(settings, f, indent=2, ensure_ascii=False)
