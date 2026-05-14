@@ -67,9 +67,6 @@ _STRINGS = {
         "limit_7d": "7d 限额",
         "idle_panel_title": "限额数据面板",
         # --- hooks.py ---
-        "hook_desc": "Claude Code statusLine — 状态栏显示 + 数据持久化到 tt-status.json",
-        "turn_info": "本轮: in {input}, out {output}",
-        "session_duration": "会话时长: {duration}",
         "no_agent_install": "未检测到 Claude Code 或 Codex，请先安装其中之一",
         "first_setup": "首次使用，正在配置状态栏...",
         "cc_not_found": "未检测到 Claude Code，跳过",
@@ -156,9 +153,6 @@ _STRINGS = {
         "limit_7d": "7d Limit",
         "idle_panel_title": "Rate Limits",
         # --- hooks.py ---
-        "hook_desc": "Claude Code statusLine — status bar display + data persistence to tt-status.json",
-        "turn_info": "Turn: in {input}, out {output}",
-        "session_duration": "Duration: {duration}",
         "no_agent_install": "Claude Code or Codex not detected, please install one first",
         "first_setup": "First run, configuring status bar...",
         "cc_not_found": "Claude Code not detected, skipping",
@@ -194,10 +188,9 @@ def _detect_lang() -> str:
 
 
 LANG = _detect_lang()
+_CURRENT = _STRINGS.get(LANG, _STRINGS["en"])
 
 
 def t(key: str, **kwargs) -> str:
-    s = _STRINGS.get(LANG, _STRINGS["en"]).get(key, key)
-    if kwargs:
-        return s.format(**kwargs)
-    return s
+    s = _CURRENT.get(key, key)
+    return s.format(**kwargs) if kwargs else s

@@ -166,6 +166,7 @@ def _show_interactive_dashboard(agents):
 
     sys.stdout.write("\033[?1049h\033[?7l\033[2J\033[3J\033[H\033[?25l")
     cache = {}
+    sort_cycle = _dashboard_sort_cycle()
 
     try:
         while True:
@@ -180,7 +181,6 @@ def _show_interactive_dashboard(agents):
             height = size.lines
 
             data = cache[agent.id]
-            sort_cycle = _dashboard_sort_cycle()
             if data:
                 _, sort_attr, sort_label = sort_cycle[sort_idx]
                 sorted_sessions = sorted(
