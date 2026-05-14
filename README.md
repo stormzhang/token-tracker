@@ -67,6 +67,28 @@ tt sessions       # 最近 20 条会话明细数据
 tt unsetup        # 卸载并恢复安装前的配置
 ```
 
+### 报告排序
+
+所有报告命令支持 `--sort` 和 `--asc/--desc` 参数：
+
+```bash
+tt daily --sort cost --desc     # 按成本降序
+tt sessions --sort tokens --asc # 按 token 升序
+```
+
+可选排序字段：`tokens` / `cost` / `messages` / `time` / `input` / `output`
+
+### Dashboard 快捷键
+
+| 按键 | 功能 |
+|------|------|
+| `←` `→` | 切换 Agent |
+| `↑` `↓` | 滚动内容 |
+| `s` | 切换排序字段（时间 → Token → 等效成本 → 消息数） |
+| `r` | 反转排序方向 |
+| `+` / `-` | 调整会话显示条数（±10，最少 10 条） |
+| `q` | 退出 |
+
 ## 环境要求
 
 - Python 3.11+

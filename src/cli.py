@@ -401,12 +401,12 @@ def main():
         render_daily(stats, agents=agent_names)
     elif command == "weekly":
         stats = _aggregate_per_agent(agents, aggregate_weekly)
-        default_attr = "week" if sort_key == "time" else "week"
+        default_attr = "week"
         _apply_sort(stats, sort_key, sort_desc, default_attr, default_reverse=True)
         render_weekly(stats, agents=agent_names)
     elif command == "monthly":
         stats = _aggregate_per_agent(agents, aggregate_monthly)
-        default_attr = "month" if sort_key == "time" else "month"
+        default_attr = "month"
         _apply_sort(stats, sort_key, sort_desc, default_attr, default_reverse=False)
         render_monthly(stats, agents=agent_names)
     elif command == "sessions":
@@ -418,7 +418,7 @@ def main():
             except ValueError:
                 pass
         stats = _aggregate_per_agent(agents, aggregate_sessions)
-        default_attr = "start_time" if sort_key == "time" else "start_time"
+        default_attr = "start_time"
         _apply_sort(stats, sort_key, sort_desc, default_attr, default_reverse=True)
         render_sessions(stats, limit)
     else:

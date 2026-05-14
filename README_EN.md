@@ -67,6 +67,28 @@ tt sessions       # last 20 session details
 tt unsetup        # uninstall and restore previous config
 ```
 
+### Report Sorting
+
+All report commands support `--sort` and `--asc/--desc` flags:
+
+```bash
+tt daily --sort cost --desc     # sort by cost, descending
+tt sessions --sort tokens --asc # sort by tokens, ascending
+```
+
+Available sort fields: `tokens` / `cost` / `messages` / `time` / `input` / `output`
+
+### Dashboard Shortcuts
+
+| Key | Action |
+|-----|--------|
+| `←` `→` | Switch agent |
+| `↑` `↓` | Scroll content |
+| `s` | Cycle sort field (time → tokens → cost → messages) |
+| `r` | Reverse sort direction |
+| `+` / `-` | Adjust session count (±10, min 10) |
+| `q` | Quit |
+
 ## Data Sources
 
 | Agent | Path | Format |
