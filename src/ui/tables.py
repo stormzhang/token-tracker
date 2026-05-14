@@ -273,6 +273,7 @@ def render_dashboard(
     agents: list[str] | None = None,
     session_limit: int = 10,
     top_margin: bool = True,
+    session_title: str | None = None,
 ) -> None:
     if not daily_stats:
         console.print(f"[{_S.warn}]暂无数据[/{_S.warn}]")
@@ -318,9 +319,9 @@ def render_dashboard(
         elif rate_limits:
             _render_idle_panel(rate_limits, cur_week, last_week)
 
-    # --- 最近十条会话 ---
+    # --- 最近会话 ---
     if sessions and session_limit > 0:
-        _render_recent_sessions(sessions[:session_limit])
+        _render_recent_sessions(sessions[:session_limit], title=session_title)
 
     console.print()
 
@@ -351,11 +352,11 @@ def _render_month_overview(month: MonthlyStats, last_month: MonthlyStats | None 
     console.print(lines)
 
 
-def _render_recent_sessions(stats: list[SessionStats]) -> None:
+def _render_recent_sessions(stats: list[SessionStats], title: str | None = None) -> None:
     multi_agent = _is_multi_agent(stats)
     mode = _width_mode()
     table = Table(
-        title="最近十条会话",
+        title=title or "最近十条会话",
         box=box.SIMPLE_HEAVY,
         header_style="bold",
         padding=(0, 1),
