@@ -6,6 +6,7 @@ from .adapters.registry import detect_agents
 from .analyzer.aggregator import aggregate_daily, aggregate_monthly, aggregate_sessions, aggregate_weekly
 from .analyzer.blocks import analyze_blocks, calculate_p90
 from .hooks import is_setup, needs_update, setup, unsetup, update_hook
+from .i18n import t
 from .ui.tables import (
     AGENT_LABEL, console, render_daily, render_dashboard,
     render_monthly, render_sessions, render_tab_bar, render_weekly,
@@ -54,7 +55,7 @@ def _apply_sort(stats, sort_key: str | None, descending: bool, default_attr: str
         return
     if sort_key not in SORT_KEYS:
         valid = ", ".join(SORT_KEYS.keys())
-        console.print(f"[yellow]未知排序字段: {sort_key}，可用: {valid}[/yellow]")
+        console.print(f"[yellow]{t('unknown_sort_field', key=sort_key, valid=valid)}[/yellow]")
         stats.sort(key=lambda s: getattr(s, default_attr), reverse=default_reverse)
         return
     mapping = SORT_KEYS[sort_key]
@@ -84,7 +85,7 @@ def _show_agent_dashboard(agent_id: str):
     agent_name = AGENT_LABEL.get(agent_id, agent_id)
     data = _build_agent_data(agent_id, agent_name)
     if not data:
-        console.print(f"[yellow]暂无 token 使用数据[/yellow]")
+        console.print(f"[yellow]{t('no_token_data')}[/yellow]")
         return
     render_dashboard(**data)
 
@@ -140,12 +141,13 @@ def _fit_screen(text: str, height: int, scroll_offset: int) -> tuple[str, int]:
     return "\n".join(visible), max_scroll
 
 
-_DASHBOARD_SORT_CYCLE = [
-    ("time", "start_time", "时间"),
-    ("tokens", "total_tokens", "Token"),
-    ("cost", "cost_usd", "等效成本"),
-    ("messages", "message_count", "消息数"),
-]
+def _dashboard_sort_cycle():
+    return [
+        ("time", "start_time", t("sort_time")),
+        ("tokens", "total_tokens", t("sort_token")),
+        ("cost", "cost_usd", t("sort_cost")),
+        ("messages", "message_count", t("sort_messages")),
+    ]
 
 
 def _show_interactive_dashboard(agents):
@@ -169,7 +171,7 @@ def _show_interactive_dashboard(agents):
         while True:
             agent = agents[current]
             if agent.id not in cache:
-                sys.stdout.write("\033[2J\033[3J\033[H\033[2m加载数据...\033[0m")
+                sys.stdout.write(f"\033[2J\033[3J\033[H\033[2m{t('loading')}\033[0m")
                 sys.stdout.flush()
                 cache[agent.id] = _build_agent_data(agent.id, agent.name)
 
@@ -178,15 +180,16 @@ def _show_interactive_dashboard(agents):
             height = size.lines
 
             data = cache[agent.id]
+            sort_cycle = _dashboard_sort_cycle()
             if data:
-                _, sort_attr, sort_label = _DASHBOARD_SORT_CYCLE[sort_idx]
+                _, sort_attr, sort_label = sort_cycle[sort_idx]
                 sorted_sessions = sorted(
                     data["sessions"],
                     key=lambda s: getattr(s, sort_attr),
                     reverse=sort_desc,
                 )
                 arrow = "↓" if sort_desc else "↑"
-                session_title = f"最近会话({session_limit})  [dim](s)排序:[/dim] {sort_label}{arrow}  [dim](r)反转  (+/-)条数[/dim]"
+                session_title = t("session_title", limit=session_limit, label=sort_label, arrow=arrow)
             else:
                 sorted_sessions = []
                 session_title = None
@@ -200,7 +203,7 @@ def _show_interactive_dashboard(agents):
                 render_data = {**data, "sessions": sorted_sessions}
                 render_dashboard(**render_data, session_limit=session_limit, top_margin=False, session_title=session_title)
             else:
-                _tables.console.print(f"[yellow]暂无数据[/yellow]")
+                _tables.console.print(f"[yellow]{t('no_data')}[/yellow]")
             _tables.console = orig
 
             screen, max_scroll = _fit_screen(buf.getvalue(), height, scroll_offset)
@@ -223,7 +226,7 @@ def _show_interactive_dashboard(agents):
             elif key == "page_down":
                 scroll_offset = min(max_scroll, scroll_offset + max(1, height - 3))
             elif key == "sort":
-                sort_idx = (sort_idx + 1) % len(_DASHBOARD_SORT_CYCLE)
+                sort_idx = (sort_idx + 1) % len(sort_cycle)
                 scroll_offset = 0
             elif key == "reverse":
                 sort_desc = not sort_desc
@@ -354,13 +357,13 @@ def main():
 
     agents = detect_agents()
     if not agents:
-        console.print("[red]未检测到任何 AI Agent[/red]")
+        console.print(f"[red]{t('no_agent')}[/red]")
         sys.exit(1)
 
     agent_ids = {a.id for a in agents}
 
     if command != "dashboard":
-        console.print(f"[dim]检测到: {', '.join(a.name + ' ✓' for a in agents)}[/dim]")
+        console.print(f"[dim]{t('detected', agents=', '.join(a.name + ' ✓' for a in agents))}[/dim]")
 
     if not is_setup():
         setup(auto=True)
@@ -371,7 +374,7 @@ def main():
     if command in AGENT_ALIASES:
         agent_id = AGENT_ALIASES[command]
         if agent_id not in agent_ids:
-            console.print(f"[red]未检测到 {command}[/red]")
+            console.print(f"[red]{t('agent_not_found', name=command)}[/red]")
             sys.exit(1)
         _show_agent_dashboard(agent_id)
         return
@@ -381,7 +384,7 @@ def main():
         if agent_filter:
             agent_id = AGENT_ALIASES[agent_filter]
             if agent_id not in agent_ids:
-                console.print(f"[red]未检测到 {agent_filter}[/red]")
+                console.print(f"[red]{t('agent_not_found', name=agent_filter)}[/red]")
                 sys.exit(1)
             _show_agent_dashboard(agent_id)
         elif len(agents) > 1 and sys.stdin.isatty():
@@ -422,8 +425,8 @@ def main():
         _apply_sort(stats, sort_key, sort_desc, default_attr, default_reverse=True)
         render_sessions(stats, limit)
     else:
-        console.print(f"[red]未知命令: {command}[/red]")
-        console.print("[dim]可用命令: dashboard, daily, weekly, monthly, sessions, claude, codex, setup, unsetup, --version[/dim]")
+        console.print(f"[red]{t('unknown_cmd', cmd=command)}[/red]")
+        console.print(f"[dim]{t('available_cmds')}[/dim]")
         sys.exit(1)
 
 
