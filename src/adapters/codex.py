@@ -82,6 +82,8 @@ def _extract_rate_limits(path: Path, models: dict[str, str]) -> RateLimits | Non
                     data = json.loads(line)
                 except json.JSONDecodeError:
                     continue
+                if not isinstance(data, dict):
+                    continue
                 if data.get("type") == "session_meta":
                     session_id = data.get("payload", {}).get("id", "")
                 if data.get("type") != "event_msg":
@@ -161,6 +163,8 @@ def _parse_jsonl(
                 try:
                     data = json.loads(line)
                 except json.JSONDecodeError:
+                    continue
+                if not isinstance(data, dict):
                     continue
 
                 row_type = data.get("type")
