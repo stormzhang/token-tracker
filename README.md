@@ -12,7 +12,7 @@
 
 自动为 Claude Code 和 Codex 配置状态栏，`tt setup` 一键配置，脚本更新时自动升级。
 
-**Claude Code**：项目名、5h/7d 配额进度条、CTX 窗口占比、Token 用量、模型名
+**Claude Code**：基于官方自定义 StatusLine 接口，数据完全来自本地 Claude，准确无任何推测
 
 ![Claude Code StatusLine](assets/screenshot-statusline-cc.png)
 
@@ -33,7 +33,7 @@
 
 > 终端宽度不足时会自动降级：先隐藏重置倒计时，再将进度条简化为百分比数字。
 
-**Codex**：项目名、5h/7d 配额、上下文剩余、模型名
+**Codex**：官方暂不支持自定义 StatusLine，使用官方默认样式，展示项目名、5h/7d 配额、上下文剩余、模型名
 
 ![Codex StatusLine](assets/screenshot-statusline-codex.png)
 

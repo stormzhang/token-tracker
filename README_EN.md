@@ -12,7 +12,7 @@ Custom StatusLine integration + CLI Dashboard — see token usage, cost, and rat
 
 `tt setup` auto-configures status lines for Claude Code and Codex, auto-upgraded when the script updates.
 
-**Claude Code**: project, 5h/7d quota progress bars, CTX window usage, token counts, model
+**Claude Code**: Built on the official custom StatusLine API — all data comes directly from local Claude, accurate with zero guesswork
 
 ![Claude Code StatusLine](assets/screenshot-statusline-cc.png)
 
@@ -33,7 +33,7 @@ The status line has three rows, left to right:
 
 > When terminal width is limited, the display auto-degrades: first hides reset countdowns, then simplifies progress bars to plain percentages.
 
-**Codex**: project, 5h/weekly quota, context remaining, model
+**Codex**: Custom StatusLine not yet supported by Codex, uses the official default style showing project, 5h/7d quota, context remaining, and model
 
 ![Codex StatusLine](assets/screenshot-statusline-codex.png)
 
