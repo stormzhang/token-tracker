@@ -16,6 +16,23 @@ Custom StatusLine integration + CLI Dashboard — see token usage, cost, and rat
 
 ![Claude Code StatusLine](assets/screenshot-statusline-cc.png)
 
+The status line has three rows, left to right:
+
+| Row | Field | Description |
+|-----|-------|-------------|
+| 1 | `project(branch)` | Current project directory + Git branch, `*` indicates uncommitted changes |
+| 1 | `5h: ██░ 31% (1h19m)` | 5-hour sliding window quota usage, countdown to reset in parentheses |
+| 1 | `7d: ██░ 11% (5d8h)` | 7-day sliding window quota usage |
+| 1 | `1.0M Context: ██░ 20%` | Total context window size and usage percentage |
+| 2 | `Tokens: in 155k, out 128k` | Cumulative input/output tokens for the current session |
+| 2 | `(Turn: in 1, out 15)` | Token usage for the current conversation turn |
+| 2 | `Cached: 204k` | Prompt cache hit tokens for the current turn |
+| 2 | `Cost: $35.51` | Estimated session cost (based on official pricing) |
+| 3 | `Duration: 3h20m` | Current session elapsed time |
+| 3 | `Opus 4.6 (1M context)/high/nofast` | Model / thinking level / fast mode status |
+
+> When terminal width is limited, the display auto-degrades: first hides reset countdowns, then simplifies progress bars to plain percentages.
+
 **Codex**: project, 5h/weekly quota, context remaining, model
 
 ![Codex StatusLine](assets/screenshot-statusline-codex.png)

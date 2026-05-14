@@ -16,6 +16,23 @@
 
 ![Claude Code StatusLine](assets/screenshot-statusline-cc.png)
 
+状态栏共三行，从左到右：
+
+| 行 | 字段 | 说明 |
+|----|------|------|
+| 1 | `项目名(分支)` | 当前项目目录 + Git 分支，未提交的修改会标 `*` |
+| 1 | `5h: ██░ 31% (1h19m)` | 5 小时滑动窗口配额用量，括号内为重置倒计时 |
+| 1 | `7d: ██░ 11% (5d8h)` | 7 天滑动窗口配额用量 |
+| 1 | `1.0M Context: ██░ 20%` | 上下文窗口总大小及已用占比 |
+| 2 | `Tokens: in 155k, out 128k` | 本次会话累计输入/输出 Token |
+| 2 | `(本轮: in 1, out 15)` | 当前对话轮次的 Token 用量 |
+| 2 | `Cached: 204k` | 当前轮次命中的 Prompt Cache Token 数 |
+| 2 | `Cost: $35.51` | 本次会话等效成本（按官方定价计算） |
+| 3 | `会话时长: 3h20m` | 当前会话已持续时间 |
+| 3 | `Opus 4.6 (1M context)/high/nofast` | 模型名 / thinking 级别 / 是否 fast 模式 |
+
+> 终端宽度不足时会自动降级：先隐藏重置倒计时，再将进度条简化为百分比数字。
+
 **Codex**：项目名、5h/7d 配额、上下文剩余、模型名
 
 ![Codex StatusLine](assets/screenshot-statusline-codex.png)
