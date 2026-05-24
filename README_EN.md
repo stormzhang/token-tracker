@@ -28,8 +28,8 @@ The status line has three rows, left to right:
 | 2 | `(Turn: in 1, out 15)` | Token usage for the current conversation turn |
 | 2 | `Cached: 204k` | Prompt cache hit tokens for the current turn |
 | 2 | `Cost: $35.51` | Estimated session cost (based on official pricing) |
-| 3 | `Duration: 3h20m` | Current session elapsed time |
-| 3 | `Opus 4.6 (1M context)/high/nofast` | Model / thinking level / fast mode status |
+| 3 | `Model: Opus 4.6/high/nofast` | Model / thinking level / fast mode status |
+| 3 | `Duration: 1h33m` | Current session elapsed time |
 
 > When terminal width is limited, the display auto-degrades: first hides reset countdowns, then simplifies progress bars to plain percentages.
 

@@ -28,8 +28,8 @@
 | 2 | `(本轮: in 1, out 15)` | 当前对话轮次的 Token 用量 |
 | 2 | `Cached: 204k` | 当前轮次命中的 Prompt Cache Token 数 |
 | 2 | `Cost: $35.51` | 本次会话等效成本（按官方定价计算） |
-| 3 | `会话时长: 3h20m` | 当前会话已持续时间 |
-| 3 | `Opus 4.6 (1M context)/high/nofast` | 模型名 / thinking 级别 / 是否 fast 模式 |
+| 3 | `Model: Opus 4.6/high/nofast` | 模型名 / thinking 级别 / 是否 fast 模式 |
+| 3 | `Duration: 1h33m` | 当前会话已持续时间 |
 
 > 终端宽度不足时会自动降级：先隐藏重置倒计时，再将进度条简化为百分比数字。
 
