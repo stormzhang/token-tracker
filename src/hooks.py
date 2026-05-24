@@ -38,26 +38,30 @@ THEMES = {
     "default": {
         "project": "\033[32m", "branch": "\033[35m", "label": "\033[34m",
         "bar_ok": "\033[32m", "bar_warn": "\033[33m", "bar_danger": "\033[31m",
-        "tokens": "\033[33m", "cached": "\033[36m", "cost": "\033[35m",
-        "duration": "\033[2;35m", "model": "\033[2;35m",
-        "dim": "\033[2m", "reset": "\033[0m",
+        "tokens": "\033[33m", "duration": "\033[2;35m", "model": "\033[2;35m",
+        "reset": "\033[0m",
     },
     "mocha": {
         "project": "\033[38;5;120m", "branch": "\033[38;5;111m", "label": "\033[38;5;218m",
         "bar_ok": "\033[38;5;151m", "bar_warn": "\033[38;5;229m", "bar_danger": "\033[38;5;217m",
-        "tokens": "\033[38;5;223m", "cached": "\033[38;5;223m", "cost": "\033[38;5;223m",
-        "duration": "\033[38;5;116m", "model": "\033[38;5;116m",
-        "dim": "\033[38;5;243m", "reset": "\033[0m",
+        "tokens": "\033[38;5;223m", "duration": "\033[38;5;116m", "model": "\033[38;5;116m",
+        "reset": "\033[0m",
     },
     "dracula": {
-        "project": "\033[38;5;84m", "branch": "\033[38;5;141m", "label": "\033[38;5;117m",
-        "bar_ok": "\033[38;5;84m", "bar_warn": "\033[38;5;228m", "bar_danger": "\033[38;5;203m",
-        "tokens": "\033[38;5;215m", "cached": "\033[38;5;117m", "cost": "\033[38;5;212m",
-        "duration": "\033[38;5;103m", "model": "\033[38;5;141m",
-        "dim": "\033[38;5;103m", "reset": "\033[0m",
+        "project": "\033[38;5;84m", "branch": "\033[38;5;75m", "label": "\033[38;5;212m",
+        "bar_ok": "\033[38;5;151m", "bar_warn": "\033[38;5;229m", "bar_danger": "\033[38;5;217m",
+        "tokens": "\033[38;5;215m", "duration": "\033[38;5;117m", "model": "\033[38;5;117m",
+        "reset": "\033[0m",
     },
 }
-C = THEMES.get(THEME, THEMES["default"])
+def _supports_256color():
+    if os.environ.get("COLORTERM", "") in ("truecolor", "24bit"):
+        return True
+    if "256color" in os.environ.get("TERM", ""):
+        return True
+    return False
+
+C = THEMES.get(THEME, THEMES["default"]) if _supports_256color() or THEME == "default" else THEMES["default"]
 
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
