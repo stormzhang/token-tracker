@@ -10,4 +10,8 @@ PIP=$(command -v pip3 || command -v pip)
 $PIP install -U token-tracker
 
 echo ""
+echo "Configuring status bar..."
+tt setup
+
+echo ""
 echo "Done! Run 'tt' to start."

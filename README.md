@@ -66,8 +66,7 @@ curl -sSL https://raw.githubusercontent.com/stormzhang/token-tracker/main/instal
 或者通过 pip：
 
 ```bash
-pip install --force-reinstall token-tracker
-tt setup
+pip install --force-reinstall token-tracker && tt setup
 ```
 
 ## 使用
