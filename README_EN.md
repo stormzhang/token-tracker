@@ -60,7 +60,7 @@ The status line has three rows, left to right:
 ## Install
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/stormzhang/token-tracker/master/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/stormzhang/token-tracker/main/install.sh | bash
 ```
 
 Or via pip:

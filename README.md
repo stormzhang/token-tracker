@@ -60,7 +60,7 @@
 ## 安装
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/stormzhang/token-tracker/master/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/stormzhang/token-tracker/main/install.sh | bash
 ```
 
 或者通过 pip：
