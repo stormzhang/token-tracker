@@ -12,7 +12,7 @@ CLAUDE_SETTINGS = os.path.expanduser("~/.claude/settings.json")
 HOOK_SCRIPT_PATH = os.path.expanduser("~/.claude/tt-statusline.py")
 CODEX_CONFIG = os.path.expanduser("~/.codex/config.toml")
 CODEX_BACKUP = os.path.expanduser("~/.codex/tt-backup.json")
-HOOK_VERSION = "1.5"
+HOOK_VERSION = "1.6"
 _BACKUP_KEY = "tokenTracker"
 _PREV_SL_KEY = "previousStatusLine"
 _SL_REGEX = re.compile(r'status_line\s*=\s*\[.*?\]', re.DOTALL)
@@ -27,17 +27,37 @@ CODEX_STATUS_LINE = [
 
 HOOK_SCRIPT = r'''#!/usr/bin/env python3
 """Claude Code statusLine — 状态栏显示 + 数据持久化到 tt-status.json"""
-__version__ = "1.5"
+__version__ = "1.6"
 import json, os, re, subprocess, sys, tempfile
 from datetime import datetime, timezone
 
 STATUS_FILE = os.path.expanduser("~/.claude/tt-status.json")
 ANSI_RE = re.compile(r'\033\[[0-9;]*m')
-C = {
-    "green": "\033[32m", "yellow": "\033[33m", "red": "\033[31m",
-    "cyan": "\033[36m", "blue": "\033[34m", "magenta": "\033[35m",
-    "peach": "\033[38;5;216m", "dim": "\033[2m", "reset": "\033[0m",
+THEME = "mocha"
+THEMES = {
+    "default": {
+        "project": "\033[32m", "branch": "\033[35m", "label": "\033[34m",
+        "bar_ok": "\033[32m", "bar_warn": "\033[33m", "bar_danger": "\033[31m",
+        "tokens": "\033[33m", "cached": "\033[36m", "cost": "\033[35m",
+        "duration": "\033[2;35m", "model": "\033[2;35m",
+        "dim": "\033[2m", "reset": "\033[0m",
+    },
+    "mocha": {
+        "project": "\033[38;5;120m", "branch": "\033[38;5;111m", "label": "\033[38;5;218m",
+        "bar_ok": "\033[38;5;151m", "bar_warn": "\033[38;5;229m", "bar_danger": "\033[38;5;217m",
+        "tokens": "\033[38;5;223m", "cached": "\033[38;5;223m", "cost": "\033[38;5;223m",
+        "duration": "\033[38;5;116m", "model": "\033[38;5;116m",
+        "dim": "\033[38;5;243m", "reset": "\033[0m",
+    },
+    "dracula": {
+        "project": "\033[38;5;84m", "branch": "\033[38;5;141m", "label": "\033[38;5;117m",
+        "bar_ok": "\033[38;5;84m", "bar_warn": "\033[38;5;228m", "bar_danger": "\033[38;5;203m",
+        "tokens": "\033[38;5;215m", "cached": "\033[38;5;117m", "cost": "\033[38;5;212m",
+        "duration": "\033[38;5;103m", "model": "\033[38;5;141m",
+        "dim": "\033[38;5;103m", "reset": "\033[0m",
+    },
 }
+C = THEMES.get(THEME, THEMES["default"])
 
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -64,7 +84,7 @@ def get_width():
 
 
 def color_by_pct(pct):
-    return C["green"] if pct < 50 else C["yellow"] if pct < 80 else C["red"]
+    return C["bar_ok"] if pct < 50 else C["bar_warn"] if pct < 80 else C["bar_danger"]
 
 
 def fmt_tokens(n):
@@ -79,7 +99,7 @@ def progress_bar(value, bar_width=8):
         return empty_char * bar_width + " n/a"
     pct = max(0.0, min(100.0, float(value)))
     filled = round(pct / 100 * bar_width)
-    return f"{color_by_pct(pct)}{filled_char * filled}{C['reset']}{empty_char * (bar_width - filled)} {pct:.0f}%"
+    return f"{color_by_pct(pct)}{filled_char * filled}{C['reset']}{empty_char * (bar_width - filled)} {C['label']}{pct:.0f}%{C['reset']}"
 
 
 def fmt_duration(seconds):
@@ -145,9 +165,9 @@ def render(data, now):
         name = os.path.basename(project)
         branch = git_branch(project)
         if branch:
-            line1.append(f"{C['green']}{name}{C['reset']}({C['magenta']}{branch}{C['reset']})")
+            line1.append(f"{C['project']}{name}{C['reset']}({C['branch']}{branch}{C['reset']})")
         else:
-            line1.append(f"{C['green']}{name}{C['reset']}")
+            line1.append(f"{C['project']}{name}{C['reset']}")
 
     rl = data.get("rate_limits") or {}
     rl_parts = []
@@ -160,19 +180,19 @@ def render(data, now):
             if resets_at:
                 remain = int(resets_at) - int(now.timestamp())
                 if remain > 0:
-                    reset_str = f" {C['dim']}({fmt_duration(remain)}){C['reset']}"
+                    reset_str = f" \033[2m{C['label']}({fmt_duration(remain)}){C['reset']}"
             rl_parts.append((
-                f"{C['blue']}{label}:{C['reset']}{progress_bar(pct, bar_w)}{reset_str}",
-                f"{C['blue']}{label}:{C['reset']}{progress_bar(pct, bar_w)}",
-                f"{C['blue']}{label}:{C['reset']}{pct:.0f}%",
+                f"{C['label']}{label}:{C['reset']}{progress_bar(pct, bar_w)}{reset_str}",
+                f"{C['label']}{label}:{C['reset']}{progress_bar(pct, bar_w)}",
+                f"{C['label']}{label}:{pct:.0f}%{C['reset']}",
             ))
 
     ctx_parts = []
     if ctx.get("used_percentage") is not None:
         size = ctx.get("context_window_size", 0)
         ctx_parts = [
-            f"{C['blue']}{fmt_tokens(size)} Context:{C['reset']}{progress_bar(ctx['used_percentage'], bar_w)}",
-            f"{C['blue']}{fmt_tokens(size)} CTX:{C['reset']}{ctx['used_percentage']:.0f}%",
+            f"{C['label']}{fmt_tokens(size)} Context:{C['reset']}{progress_bar(ctx['used_percentage'], bar_w)}",
+            f"{C['label']}{fmt_tokens(size)} CTX:{ctx['used_percentage']:.0f}%{C['reset']}",
         ]
 
     # 尝试完整版（带进度条+reset time）
@@ -199,19 +219,19 @@ def render(data, now):
     curr_usage = (ctx.get("current_usage") or {})
     turn_in_total = curr_usage.get("input_tokens", 0) + curr_usage.get("cache_creation_input_tokens", 0)
     turn_out = curr_usage.get("output_tokens", 0)
-    turn_str = f" {C['dim']}(本轮: in {fmt_tokens(turn_in_total)}, out {fmt_tokens(turn_out)}){C['reset']}"
+    turn_str = f" \033[2m{C['tokens']}(本轮: in {fmt_tokens(turn_in_total)}, out {fmt_tokens(turn_out)}){C['reset']}"
     if total_in or total_out:
-        tok_full = f"{C['peach']}Tokens: in {fmt_tokens(total_in)}, out {fmt_tokens(total_out)}{turn_str}"
-        tok_short = f"{C['peach']}Tokens: in {fmt_tokens(total_in)}, out {fmt_tokens(total_out)}{C['reset']}"
+        tok_full = f"{C['tokens']}Tokens: in {fmt_tokens(total_in)}, out {fmt_tokens(total_out)}{turn_str}"
+        tok_short = f"{C['tokens']}Tokens: in {fmt_tokens(total_in)}, out {fmt_tokens(total_out)}{C['reset']}"
         line2.append(tok_full)
     cache_read = curr_usage.get("cache_read_input_tokens", 0)
     if cache_read > 0:
-        line2.append(f"{C['cyan']}Cached: {fmt_tokens(cache_read)}{C['reset']}")
+        line2.append(f"{C['tokens']}Cached: {fmt_tokens(cache_read)}{C['reset']}")
 
     cost = data.get("cost") or {}
     usd = cost.get("total_cost_usd")
     if usd is not None:
-        line2.append(f"{C['magenta']}Cost: ${usd:.2f}{C['reset']}")
+        line2.append(f"{C['tokens']}Cost: ${usd:.2f}{C['reset']}")
 
     # 宽度不够时隐藏本轮数据
     if vlen(" | ".join(line2)) > W and (total_in or total_out):
@@ -219,23 +239,24 @@ def render(data, now):
         if vlen(" | ".join(line2)) > W:
             line2 = line2[1:]
 
-    # --- Line 3: Duration + Model ---
+    # --- Line 3: Model | Duration ---
     line3 = []
-
-    duration_ms = cost.get("total_duration_ms")
-    duration_part = ""
-    if duration_ms and duration_ms > 0:
-        duration_part = f"{C['dim']}{C['magenta']}会话时长: {fmt_duration(duration_ms / 1000)}{C['reset']}"
-        line3.append(duration_part)
 
     model_name = (data.get("model") or {}).get("display_name", "")
     if model_name:
+        model_name = re.sub(r'\s*\(.*?\)', '', model_name)
         effort = (data.get("effort") or {}).get("level", "")
         if effort:
             model_name += f"/{effort}"
         fast = data.get("fast_mode")
         model_name += f"/{'fast' if fast else 'nofast'}"
-        line3.append(f"{C['dim']}{C['magenta']}{model_name}{C['reset']}")
+        line3.append(f"{C['model']}Model: {model_name}{C['reset']}")
+
+    duration_ms = cost.get("total_duration_ms")
+    duration_part = ""
+    if duration_ms and duration_ms > 0:
+        duration_part = f"{C['duration']}Duration: {fmt_duration(duration_ms / 1000)}{C['reset']}"
+        line3.append(duration_part)
 
     # 宽度不够时隐藏会话时长
     if vlen(" | ".join(line3)) > W and duration_part:
