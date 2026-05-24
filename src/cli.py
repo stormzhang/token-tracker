@@ -345,6 +345,11 @@ def main():
     args = sys.argv[1:]
     command = args[0] if args else "dashboard"
 
+    # 已配置过的情况下，任意命令都顺带同步状态栏脚本（setup/unsetup 自行处理）
+    # 避免升级 pip 包后忘了 tt setup，导致 ~/.claude/tt-statusline.py 停在旧版本
+    if command not in ("setup", "unsetup") and is_setup() and needs_update():
+        update_hook()
+
     if command in ("--version", "-v", "-V"):
         print(f"tt {_get_version()}")
         return
@@ -367,8 +372,6 @@ def main():
 
     if not is_setup():
         setup(auto=True)
-    elif needs_update():
-        update_hook()
 
     # tt claude / tt codex
     if command in AGENT_ALIASES:
