@@ -13,6 +13,7 @@ dependencies = [
 
 [project.scripts]
 tt = "src.cli:main"
+tt-http = "src.http_api:main"
 
 [tool.setuptools.packages.find]
 include = ["src*"]

@@ -59,14 +59,21 @@ def load_rate_limits() -> RateLimits | None:
     if not sessions_path.is_dir():
         return None
 
-    jsonl_files = sorted(sessions_path.rglob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
     models = _load_thread_models()
+    latest = None
 
-    for path in jsonl_files[:5]:
+    for path in sessions_path.rglob("*.jsonl"):
         rl = _extract_rate_limits(path, models)
-        if rl:
-            return rl
-    return None
+        if not rl or not rl.updated_at:
+            continue
+        try:
+            updated = datetime.fromisoformat(rl.updated_at.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if latest is None or updated > latest[0]:
+            latest = (updated, rl)
+
+    return latest[1] if latest else None
 
 
 def _extract_rate_limits(path: Path, models: dict[str, str]) -> RateLimits | None:
@@ -101,6 +108,9 @@ def _extract_rate_limits(path: Path, models: dict[str, str]) -> RateLimits | Non
         return None
 
     rl, ts, sid = last_rl
+    if rl.get("limit_id") != "codex":
+        return None
+
     primary = rl.get("primary") or {}
     secondary = rl.get("secondary") or {}
 

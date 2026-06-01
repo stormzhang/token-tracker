@@ -1,0 +1,8 @@
+services:
+  token-tracker:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - ${HOME}/.codex:/root/.codex:ro
+    restart: unless-stopped

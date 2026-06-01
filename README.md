@@ -83,6 +83,46 @@ tt sessions       # 最近 20 条会话明细数据
 tt unsetup        # 卸载并恢复安装前的配置
 ```
 
+## HTTP API / Docker
+
+可通过 Docker 只读挂载本机 Codex 数据目录，对外提供 Codex 5h / 周限额百分比接口：
+
+```bash
+docker compose up -d --build
+curl http://127.0.0.1:8080/api/codex/rate-limits
+```
+
+返回示例：
+
+```json
+{
+  "agent": "codex",
+  "available": true,
+  "5h": {"used_percent": 25.0, "reset_at": 1780312510, "reset_at_iso": "2026-06-01T11:15:10Z"},
+  "wk": {"used_percent": 13.0, "reset_at": 1780846058, "reset_at_iso": "2026-06-07T15:27:38Z"},
+  "model": "gpt-5.5",
+  "updated_at": "2026-06-01T09:27:52.192Z",
+  "source_dir": "/root/.codex"
+}
+```
+
+接口：
+
+- `GET /health`
+- `GET /api/codex/rate-limits`
+- `GET /api/codex/usage`，同上，便于外部监控系统接入
+
+Docker 默认使用：
+
+```yaml
+ports:
+  - "8080:8080"
+volumes:
+  - ${HOME}/.codex:/root/.codex:ro
+```
+
+容器只读取 `~/.codex/sessions/*.jsonl` 和 `~/.codex/state_5.sqlite`，不修改 Codex 配置。端口默认暴露到宿主机所有网卡；如仅需本机访问，可改为 `127.0.0.1:8080:8080`。
+
 ### 报告排序
 
 所有报告命令支持 `--sort` 和 `--asc/--desc` 参数：
