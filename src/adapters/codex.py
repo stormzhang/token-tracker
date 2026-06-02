@@ -99,7 +99,7 @@ def _extract_rate_limits(path: Path, models: dict[str, str]) -> RateLimits | Non
                 if payload.get("type") != "token_count":
                     continue
                 rl = payload.get("rate_limits")
-                if rl:
+                if rl and rl.get("limit_id") == "codex":
                     last_rl = (rl, data.get("timestamp", ""), session_id)
     except (OSError, PermissionError):
         return None
@@ -108,9 +108,6 @@ def _extract_rate_limits(path: Path, models: dict[str, str]) -> RateLimits | Non
         return None
 
     rl, ts, sid = last_rl
-    if rl.get("limit_id") != "codex":
-        return None
-
     primary = rl.get("primary") or {}
     secondary = rl.get("secondary") or {}
 

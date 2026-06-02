@@ -22,8 +22,8 @@ def _token_count(timestamp: str, limit_id: str, five: float, weekly: float) -> d
             "type": "token_count",
             "rate_limits": {
                 "limit_id": limit_id,
-                "primary": {"used_percent": five, "resets_at": 1780312510},
-                "secondary": {"used_percent": weekly, "resets_at": 1780846058},
+                "primary": {"used_percent": five, "resets_at": 1999999999},
+                "secondary": {"used_percent": weekly, "resets_at": 1999999999},
             },
         },
     }
@@ -61,6 +61,21 @@ class CodexRateLimitsTest(unittest.TestCase):
             rate_limits = codex._extract_rate_limits(path, {})
 
         self.assertIsNone(rate_limits)
+
+    def test_extract_rate_limits_keeps_latest_codex_when_other_limit_follows(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "session.jsonl"
+            _write_session(path, "session", [
+                _token_count("2026-06-02T06:36:59Z", "codex", 3.0, 40.0),
+                _token_count("2026-06-02T06:57:41Z", "codex_bengalfox", 0.0, 0.0),
+            ])
+
+            rate_limits = codex._extract_rate_limits(path, {})
+
+        self.assertIsNotNone(rate_limits)
+        self.assertEqual(rate_limits.five_hour_pct, 3.0)
+        self.assertEqual(rate_limits.seven_day_pct, 40.0)
+        self.assertEqual(rate_limits.updated_at, "2026-06-02T06:36:59Z")
 
 
 if __name__ == "__main__":
