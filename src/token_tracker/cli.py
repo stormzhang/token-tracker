@@ -345,6 +345,94 @@ def _get_version() -> str:
     return version("token-tracker")
 
 
+def _cmd_quota(args: list[str]) -> None:
+    """诊断配额查询状态"""
+    from .adapters.rate_limits import _load_official, _load_config, load_rate_limits, CONFIG_FILE
+    from .adapters.providers import create_provider
+
+    debug = "--debug" in args or "-d" in args
+
+    console = get_console()
+    console.print("[bold]配额诊断[/bold]")
+    console.print(f"配置文件: {CONFIG_FILE}")
+
+    # 检查配置文件
+    config = _load_config()
+    if config:
+        console.print(f"  [green]✓[/green] 配置文件存在")
+        if debug:
+            import json
+            masked = dict(config)
+            rp = masked.get("rate_provider")
+            if rp:
+                rp = dict(rp)
+                masked["rate_provider"] = rp
+                if rp.get("cookie"):
+                    rp["cookie"] = rp["cookie"][:20] + "..." + rp["cookie"][-10:]
+                if rp.get("command"):
+                    import os as _os
+                    home = _os.path.expanduser("~")
+                    rp["command"] = rp["command"].replace(home, "~")
+            console.print(f"  配置内容: {json.dumps(masked, indent=2, ensure_ascii=False)}")
+    else:
+        console.print(f"  [yellow]○[/yellow] 配置文件不存在")
+
+    # 检查官方数据
+    official = _load_official()
+    if official:
+        has_quota = official.five_hour_pct is not None or official.seven_day_pct is not None
+        status = "✓ 含配额数据" if has_quota else "○ 无配额数据"
+        console.print(f"官方数据: [{ 'green' if has_quota else 'yellow' }]{status}[/{ 'green' if has_quota else 'yellow' }]")
+        if debug:
+            console.print(f"  5h: {official.five_hour_pct}%, 7d: {official.seven_day_pct}%")
+    else:
+        console.print("官方数据: [yellow]○ 无数据[/yellow]")
+
+    # 检查提供者
+    if config and "rate_provider" in config:
+        provider = create_provider(config["rate_provider"])
+        if provider:
+            console.print(f"提供者: [green]✓ {provider.__class__.__name__}[/green]")
+            result = provider.get_limits()
+            if result:
+                console.print(f"  查询成功:")
+                if result.five_hour_pct is not None:
+                    console.print(f"    5h: {result.five_hour_pct}%")
+                if result.seven_day_pct is not None:
+                    console.print(f"    7d: {result.seven_day_pct}%")
+                if result.monthly_pct is not None:
+                    console.print(f"    月: {result.monthly_pct}%")
+                console.print(f"    来源: {result.source}")
+            else:
+                console.print(f"  [red]✗ 查询失败[/red]")
+        else:
+            pt = config["rate_provider"].get("type", "unknown")
+            console.print(f"提供者: [red]✗ 不支持的类型 '{pt}'[/red]")
+    else:
+        console.print("提供者: [yellow]○ 未配置[/yellow]")
+
+    # 最终生效结果
+    final = load_rate_limits()
+    console.print()
+    console.print("[bold]最终生效数据[/bold]")
+    if final:
+        parts = []
+        if final.five_hour_pct is not None:
+            parts.append(f"5h={final.five_hour_pct:.0f}%")
+        if final.seven_day_pct is not None:
+            parts.append(f"7d={final.seven_day_pct:.0f}%")
+        if final.monthly_pct is not None:
+            parts.append(f"月={final.monthly_pct:.0f}%")
+        if parts:
+            console.print(f"  [green]✓[/green] {', '.join(parts)}")
+        else:
+            console.print(f"  [yellow]○[/yellow] 无有效配额数据")
+        if final.model:
+            console.print(f"  模型: {final.model}")
+    else:
+        console.print(f"  [yellow]○[/yellow] 无数据")
+
+
 def main():
     args = sys.argv[1:]
     command = args[0] if args else "dashboard"
@@ -352,6 +440,11 @@ def main():
     # 版本查询不该触发任何文件读写，放在 auto-update 之前短路返回
     if command in ("--version", "-v", "-V"):
         print(f"tt {_get_version()}")
+        return
+
+    # 配额诊断：独立于 setup/auto-update，纯粹查询配置和数据源状态
+    if command == "quota":
+        _cmd_quota(args[1:])
         return
 
     # 已配置过的情况下，任意命令都顺带同步状态栏脚本（setup/unsetup 自行处理）

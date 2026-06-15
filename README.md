@@ -114,6 +114,115 @@ tt sessions --sort tokens --asc # 按 token 升序
 | `+` / `-` | 调整会话显示条数（±10，最少 10 条） |
 | `q` | 退出 |
 
+## 第三方 Coding Plan 配额对接
+
+官方 API 会自动注入配额数据到状态栏，但第三方平台（如火山方舟）不支持此机制。Token Tracker 提供可扩展的 Provider 架构，通过脚本或 API 对接第三方平台的 Coding Plan 用量数据。
+
+### 配置方式
+
+在 `~/.claude/tt-config.json` 中配置配额提供者：
+
+```json
+{
+  "rate_provider": {
+    "type": "script",
+    "command": "python ~/.claude/tt-ark-quota.py",
+    "cache_ttl": 60,
+    "timeout": 10
+  }
+}
+```
+
+配置项说明：
+
+| 字段 | 默认值 | 说明 |
+|------|--------|------|
+| `type` | — | 固定为 `script` |
+| `command` | — | 要执行的命令 |
+| `cache_ttl` | `60` | 缓存秒数，避免频繁调用脚本（建议 ≥ 30） |
+| `timeout` | `10` | 脚本执行超时秒数 |
+
+### 脚本输出格式
+
+自定义脚本需要输出标准 JSON 格式：
+
+```json
+{
+  "five_hour": {
+    "used_percentage": 31.5,
+    "resets_at": 1718457600
+  },
+  "seven_day": {
+    "used_percentage": 12.3,
+    "resets_at": 1718889600
+  },
+  "monthly": {
+    "used_percentage": 8.7,
+    "resets_at": 1719753600
+  },
+  "source": "火山方舟"
+}
+```
+
+### 火山方舟配置样例
+
+创建 `~/.claude/tt-ark-quota.py`：
+
+```python
+#!/usr/bin/env python3
+import json
+import urllib.request
+import urllib.error
+import sys
+
+# 从浏览器开发者工具复制 Cookie 和 x-csrf-token
+COOKIE = "monitor_huoshan_web_id=xxx; connect.sid=xxx; ..."
+X_CSRF_TOKEN = "xxx"
+
+API_URL = "https://console.volcengine.com/api/top/ark/cn-beijing/2024-01-01/GetCodingPlanUsage?"
+
+def main():
+    try:
+        req = urllib.request.Request(API_URL, method="POST")
+        req.add_header("cookie", COOKIE)
+        req.add_header("x-csrf-token", X_CSRF_TOKEN)
+
+        with urllib.request.urlopen(req, data=b"{}", timeout=10) as resp:
+            data = json.loads(resp.read().decode())
+
+        quota_map = {}
+        for item in data.get("Result", {}).get("QuotaUsage", []):
+            level = item.get("Level")
+            percent = item.get("Percent")
+            reset = item.get("ResetTimestamp")
+            if level == "session":
+                quota_map["five_hour"] = {"used_percentage": percent, "resets_at": reset}
+            elif level == "weekly":
+                quota_map["seven_day"] = {"used_percentage": percent, "resets_at": reset}
+            elif level == "monthly":
+                quota_map["monthly"] = {"used_percentage": percent, "resets_at": reset}
+
+        print(json.dumps({**quota_map, "source": "火山方舟"}))
+    except urllib.error.HTTPError as e:
+        print(f"HTTP Error: {e.code}", file=sys.stderr)
+        sys.exit(1)
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
+```
+
+### 诊断命令
+
+配置完成后，使用诊断命令验证：
+
+```bash
+tt quota           # 查看配额状态和提供者信息
+tt quota --debug   # 详细调试信息（含配置内容）
+```
+
 ## 数据来源
 
 | Agent | 路径 | 格式 |

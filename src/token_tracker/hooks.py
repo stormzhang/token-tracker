@@ -30,7 +30,7 @@ CODEX_STATUS_LINE = [
 HOOK_SCRIPT = r'''#!/usr/bin/env python3
 """Claude Code statusLine — 状态栏显示 + 数据持久化到 tt-status.json"""
 __version__ = "__HOOK_VERSION__"
-import json, os, re, subprocess, sys, tempfile
+import json, os, re, subprocess, sys, tempfile, time
 from datetime import datetime, timezone
 
 STATUS_FILE = os.path.expanduser("~/.claude/tt-status.json")
@@ -64,9 +64,100 @@ def _supports_256color():
     return False
 
 C = THEMES.get(THEME, THEMES["default"]) if _supports_256color() or THEME == "default" else THEMES["default"]
+CONFIG_FILE = os.path.expanduser("~/.claude/tt-config.json")
+CACHE_DIR = os.path.expanduser("~/.cache/token-tracker")
+CACHE_TTL = 60  # 默认值，实际从用户配置读取
 
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
+
+def _load_config():
+    """读取 tt-config.json"""
+    try:
+        with open(CONFIG_FILE, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def _get_cached_quota(ttl=CACHE_TTL):
+    """读取缓存的配额数据"""
+    cache_file = os.path.join(CACHE_DIR, "tt_statusline_quota.json")
+    try:
+        with open(cache_file, encoding="utf-8") as f:
+            data = json.load(f)
+        if time.time() - data.get("_ts", 0) < ttl:
+            return data.get("payload")
+    except Exception:
+        pass
+    return None
+
+
+def _set_cached_quota(payload):
+    """写入缓存"""
+    try:
+        os.makedirs(CACHE_DIR, exist_ok=True)
+        cache_file = os.path.join(CACHE_DIR, "tt_statusline_quota.json")
+        with open(cache_file, "w", encoding="utf-8") as f:
+            json.dump({"_ts": time.time(), "payload": payload}, f)
+    except Exception:
+        pass
+
+
+def _apply_provider_fallback(data):
+    """官方配额为空时，调用配置的 provider 补充"""
+    # 先检查官方有没有配额
+    rl = data.get("rate_limits") or {}
+    has_official = False
+    for k in ["five_hour", "seven_day", "monthly"]:
+        entry = rl.get(k) or {}
+        if entry.get("used_percentage") is not None:
+            has_official = True
+            break
+    if has_official:
+        return
+
+    # 没有官方配额，尝试走 provider
+    config = _load_config()
+    if not config or "rate_provider" not in config:
+        return
+
+    rp = config["rate_provider"]
+    if rp.get("type") != "script":
+        return  # 状态栏脚本只支持 script provider（不需要额外依赖）
+
+    # 读取用户配置的缓存 TTL，默认 60 秒
+    cache_ttl = int(rp.get("cache_ttl", 60))
+
+    # 先读缓存
+    cached = _get_cached_quota(cache_ttl)
+    if cached:
+        data["rate_limits"] = cached
+        return
+
+    # 执行脚本，默认超时 10 秒
+    try:
+        result = subprocess.run(
+            rp.get("command", ""),
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=int(rp.get("timeout", 10)),
+        )
+        if result.returncode != 0:
+            return
+        provider_data = json.loads(result.stdout.strip())
+        # 把 provider 输出转成 Claude 格式
+        claude_rl = {}
+        for k in ["five_hour", "seven_day", "monthly"]:
+            if k in provider_data:
+                claude_rl[k] = provider_data[k]
+        if claude_rl:
+            data["rate_limits"] = claude_rl
+            _set_cached_quota(claude_rl)
+    except Exception:
+        pass
 
 
 def vlen(s):
@@ -282,6 +373,9 @@ def main():
         data = json.loads(raw)
     except Exception:
         return
+
+    # 第三方配额 fallback：官方没有配额时调用脚本查询
+    _apply_provider_fallback(data)
 
     now = datetime.now(timezone.utc)
     save_data(data, now)

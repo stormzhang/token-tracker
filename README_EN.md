@@ -114,6 +114,115 @@ Available sort fields: `tokens` / `cost` / `messages` / `time` / `input` / `outp
 | `+` / `-` | Adjust session count (±10, min 10) |
 | `q` | Quit |
 
+## Third-Party Coding Plan Quota Integration
+
+Official APIs automatically inject quota data into the status line, but third-party platforms (like Volcano Engine Ark) don't support this. Token Tracker provides an extensible Provider architecture to fetch Coding Plan usage data via scripts or APIs.
+
+### Configuration
+
+Configure the quota provider in `~/.claude/tt-config.json`:
+
+```json
+{
+  "rate_provider": {
+    "type": "script",
+    "command": "python ~/.claude/tt-ark-quota.py",
+    "cache_ttl": 60,
+    "timeout": 10
+  }
+}
+```
+
+Configuration options:
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `type` | — | Must be `script` |
+| `command` | — | Command to execute |
+| `cache_ttl` | `60` | Cache duration in seconds to avoid frequent script calls (recommended ≥ 30) |
+| `timeout` | `10` | Script execution timeout in seconds |
+
+### Script Output Format
+
+Custom scripts must output standard JSON format:
+
+```json
+{
+  "five_hour": {
+    "used_percentage": 31.5,
+    "resets_at": 1718457600
+  },
+  "seven_day": {
+    "used_percentage": 12.3,
+    "resets_at": 1718889600
+  },
+  "monthly": {
+    "used_percentage": 8.7,
+    "resets_at": 1719753600
+  },
+  "source": "Volcano Engine Ark"
+}
+```
+
+### Volcano Engine Ark Example
+
+Create `~/.claude/tt-ark-quota.py`:
+
+```python
+#!/usr/bin/env python3
+import json
+import urllib.request
+import urllib.error
+import sys
+
+# Copy Cookie and x-csrf-token from browser developer tools
+COOKIE = "monitor_huoshan_web_id=xxx; connect.sid=xxx; ..."
+X_CSRF_TOKEN = "xxx"
+
+API_URL = "https://console.volcengine.com/api/top/ark/cn-beijing/2024-01-01/GetCodingPlanUsage?"
+
+def main():
+    try:
+        req = urllib.request.Request(API_URL, method="POST")
+        req.add_header("cookie", COOKIE)
+        req.add_header("x-csrf-token", X_CSRF_TOKEN)
+
+        with urllib.request.urlopen(req, data=b"{}", timeout=10) as resp:
+            data = json.loads(resp.read().decode())
+
+        quota_map = {}
+        for item in data.get("Result", {}).get("QuotaUsage", []):
+            level = item.get("Level")
+            percent = item.get("Percent")
+            reset = item.get("ResetTimestamp")
+            if level == "session":
+                quota_map["five_hour"] = {"used_percentage": percent, "resets_at": reset}
+            elif level == "weekly":
+                quota_map["seven_day"] = {"used_percentage": percent, "resets_at": reset}
+            elif level == "monthly":
+                quota_map["monthly"] = {"used_percentage": percent, "resets_at": reset}
+
+        print(json.dumps({**quota_map, "source": "Volcano Engine Ark"}))
+    except urllib.error.HTTPError as e:
+        print(f"HTTP Error: {e.code}", file=sys.stderr)
+        sys.exit(1)
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
+```
+
+### Diagnostic Commands
+
+After configuration, use diagnostic commands to verify:
+
+```bash
+tt quota           # show quota status and provider info
+tt quota --debug   # detailed debug output (including configuration)
+```
+
 ## Data Sources
 
 | Agent | Path | Format |
