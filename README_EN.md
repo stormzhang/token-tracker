@@ -214,6 +214,92 @@ if __name__ == "__main__":
     main()
 ```
 
+### opencode Example
+
+opencode's usage data isn't a standalone REST API — it's embedded in the workspace page HTML as an inline script (SolidJS hydration stream), exposing `rollingUsage` / `weeklyUsage` / `monthlyUsage`. Auth uses the `auth` cookie set after login; the script fetches the page and extracts the three usage entries via regex.
+
+Create `~/.claude/tt-opencode-quota.py`:
+
+```python
+#!/usr/bin/env python3
+"""opencode usage query: fetch the workspace page HTML and extract inline-script usage entries."""
+import json
+import re
+import time
+import urllib.request
+import urllib.error
+import ssl
+import sys
+
+# ========== Config ==========
+# Workspace ID (the wrk_xxx from the URL)
+WORKSPACE_ID = "wrk_xxxxxxxxxxxxxxxxxxxxxxxx"
+
+# Copy the auth cookie value from your browser (the long Fe26.2**... string); it expires, refresh as needed
+AUTH_COOKIE = "Fe26.2**xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+
+PAGE_URL = f"https://opencode.ai/workspace/{WORKSPACE_ID}/go"
+# =============================
+
+
+def fetch_usage():
+    req = urllib.request.Request(PAGE_URL, method="GET")
+    req.add_header("cookie", f"oc_locale=zh; auth={AUTH_COOKIE.strip()}")
+    req.add_header("user-agent",
+                   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                   "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36")
+    ssl_context = ssl.create_default_context()
+    ssl_context.check_hostname = False
+    ssl_context.verify_mode = ssl.CERT_NONE
+    with urllib.request.urlopen(req, timeout=15, context=ssl_context) as resp:
+        return resp.read().decode()
+
+
+def parse(html):
+    """In the hydration stream the order is fixed: rollingUsage -> weeklyUsage -> monthlyUsage."""
+    secs = re.findall(r"resetInSec:(\d+)", html)
+    pcts = re.findall(r"usagePercent:([\d.]+)", html)
+    if len(secs) < 3 or len(pcts) < 3:
+        raise ValueError("usage field parsing failed: cookie may be expired or page structure changed")
+    return secs[:3], pcts[:3]
+
+
+def main():
+    now = int(time.time())
+    try:
+        html = fetch_usage()
+        secs, pcts = parse(html)
+        rolling_sec, weekly_sec, monthly_sec = (int(s) for s in secs)
+        rolling_pct, weekly_pct, monthly_pct = (float(p) for p in pcts)
+        print(json.dumps({
+            "five_hour": {"used_percentage": round(rolling_pct, 1), "resets_at": now + rolling_sec},
+            "seven_day": {"used_percentage": round(weekly_pct, 1), "resets_at": now + weekly_sec},
+            "monthly": {"used_percentage": round(monthly_pct, 1), "resets_at": now + monthly_sec},
+            "source": "opencode",
+        }, ensure_ascii=False))
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
+```
+
+The matching `tt-config.json`:
+
+```json
+{
+  "rate_provider": {
+    "type": "script",
+    "command": "python ~/.claude/tt-opencode-quota.py",
+    "cache_ttl": 60
+  }
+}
+```
+
+> Note: the `auth` cookie is Fe26.2-encrypted and expires; re-copy it from your browser when it stops working.
+
 ### Diagnostic Commands
 
 After configuration, use diagnostic commands to verify:
