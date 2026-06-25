@@ -106,6 +106,7 @@ tt status         # last-5h real-time panel
 tt weekly         # weekly report
 tt monthly        # monthly report
 tt sessions       # last 20 session details (tt sessions <n> to change count, --sort to change order)
+tt quota          # diagnose third-party quota provider
 tt theme          # view / switch color theme (show / list / set / preview)
 tt unsetup        # uninstall and restore previous config
 tt --version      # show version (-v / -V)
@@ -135,6 +136,123 @@ tt monthly --theme nord  # render any report in a theme temporarily (no persist,
 
 - Choice persists to `~/.config/token-tracker/config.json`; priority: `--theme` flag > `TT_THEME` env var > config file > auto.
 - Truecolor terminals get exact colors; terminals without truecolor (e.g. macOS Terminal.app) fall back to a **256-color approximation**.
+
+## Third-Party Quota Integration
+
+When using API keys with third-party platforms (OpenCode, etc.), CC / Codex won't inject quota data automatically. Token Tracker provides an extensible Provider architecture to fetch plan usage via external scripts.
+
+### Configuration
+
+Configure the quota provider in `~/.claude/tt-config.json`:
+
+```json
+{
+  "rate_provider": {
+    "type": "script",
+    "command": "python ~/.claude/tt-opencode-quota.py",
+    "cache_ttl": 60,
+    "timeout": 10
+  }
+}
+```
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `type` | — | Must be `script` |
+| `command` | — | Command to execute |
+| `cache_ttl` | `60` | Cache TTL in seconds |
+| `timeout` | `10` | Script timeout in seconds |
+
+### Script Output Format
+
+The script must output JSON to stdout:
+
+```json
+{
+  "five_hour": {
+    "used_percentage": 31.5,
+    "resets_at": 1718457600
+  },
+  "seven_day": {
+    "used_percentage": 12.3,
+    "resets_at": 1718889600
+  },
+  "monthly": {
+    "used_percentage": 8.7,
+    "resets_at": 1719753600
+  },
+  "source": "OpenCode"
+}
+```
+
+All window fields are optional. `source` identifies the provider, displayed in `tt status` and the status line.
+
+### opencode Example
+
+Create `~/.claude/tt-opencode-quota.py`:
+
+```python
+#!/usr/bin/env python3
+"""OpenCode quota fetcher — GET workspace page, regex-extract usage from inline script."""
+import json, re, time, urllib.request, ssl, sys
+
+WORKSPACE_ID = "wrk_xxxxxxxxxxxxxxxxxxxxxxxx"
+AUTH_COOKIE = "Fe26.2**xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+PAGE_URL = f"https://opencode.ai/workspace/{WORKSPACE_ID}/go"
+
+
+def fetch_usage():
+    req = urllib.request.Request(PAGE_URL)
+    req.add_header("cookie", f"oc_locale=en; auth={AUTH_COOKIE.strip()}")
+    req.add_header("user-agent",
+                   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                   "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36")
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        return resp.read().decode()
+
+
+def parse(html):
+    secs = re.findall(r"resetInSec:(\d+)", html)
+    pcts = re.findall(r"usagePercent:([\d.]+)", html)
+    if len(secs) < 3 or len(pcts) < 3:
+        raise ValueError("Failed to parse usage fields; cookie may be expired")
+    return secs[:3], pcts[:3]
+
+
+def main():
+    now = int(time.time())
+    try:
+        html = fetch_usage()
+        secs, pcts = parse(html)
+        rolling_s, weekly_s, monthly_s = (int(s) for s in secs)
+        rolling_p, weekly_p, monthly_p = (float(p) for p in pcts)
+        print(json.dumps({
+            "five_hour": {"used_percentage": round(rolling_p, 1), "resets_at": now + rolling_s},
+            "seven_day": {"used_percentage": round(weekly_p, 1), "resets_at": now + weekly_s},
+            "monthly": {"used_percentage": round(monthly_p, 1), "resets_at": now + monthly_s},
+            "source": "OpenCode",
+        }))
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
+```
+
+> The `auth` cookie uses Fe26.2 encryption and expires. Re-copy from browser when it stops working.
+
+### Diagnostic Command
+
+Verify the setup with:
+
+```bash
+tt quota           # show quota status and provider info
+tt quota --debug   # detailed debug output (masked config)
+```
+
+Data priority: Official CC quota (subscription) > third-party provider > official metadata only (fallback). When no official quota is detected, the CC status line automatically queries the configured provider.
 
 ## Advanced
 
