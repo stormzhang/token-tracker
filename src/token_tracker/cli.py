@@ -353,6 +353,93 @@ def cmd_theme(args: list[str]) -> None:
         get_console().print(f"[dim]{t('theme_usage')}[/dim]")
 
 
+def _cmd_quota(args: list[str]) -> None:
+    """诊断配额查询状态；顺带触发状态栏脚本重烘焙（quota 是第三方配额主入口，需保证脚本带 provider 调用）"""
+    from .adapters.providers import create_provider
+    from .adapters.rate_limits import CONFIG_FILE, _load_config, _load_official, load_rate_limits
+
+    # 已配置过才同步状态栏脚本——未配置时 quota 仅作纯查询，不主动安装
+    if is_setup() and needs_update():
+        update_hook()
+
+    debug = "--debug" in args or "-d" in args
+
+    console = get_console()
+    console.print("[bold]Quota Diagnostics[/bold]")
+    console.print(f"Config file: {CONFIG_FILE}")
+
+    config = _load_config()
+    if config:
+        console.print("  [green]v[/green] Config file exists")
+        if debug:
+            masked = dict(config)
+            rp = masked.get("rate_provider")
+            if rp:
+                rp = dict(rp)
+                masked["rate_provider"] = rp
+                if rp.get("cookie"):
+                    rp["cookie"] = rp["cookie"][:20] + "..." + rp["cookie"][-10:]
+                if rp.get("command"):
+                    home = os.path.expanduser("~")
+                    rp["command"] = rp["command"].replace(home, "~")
+            import json as _json
+            console.print(f"  Config content: {_json.dumps(masked, indent=2, ensure_ascii=False)}")
+    else:
+        console.print("  [yellow]o[/yellow] Config file not found")
+
+    official = _load_official()
+    if official:
+        has_quota = official.five_hour_pct is not None or official.seven_day_pct is not None
+        status = "v Contains quota" if has_quota else "o No quota"
+        console.print(f"Official data: [{'green' if has_quota else 'yellow'}]{status}[/{'green' if has_quota else 'yellow'}]")
+        if debug:
+            console.print(f"  5h: {official.five_hour_pct}%, 7d: {official.seven_day_pct}%")
+    else:
+        console.print("Official data: [yellow]o No data[/yellow]")
+
+    if config and "rate_provider" in config:
+        provider = create_provider(config["rate_provider"])
+        if provider:
+            console.print(f"Provider: [green]v {provider.__class__.__name__}[/green]")
+            result = provider.get_limits()
+            if result:
+                console.print("  Query successful:")
+                if result.five_hour_pct is not None:
+                    console.print(f"    5h: {result.five_hour_pct}%")
+                if result.seven_day_pct is not None:
+                    console.print(f"    7d: {result.seven_day_pct}%")
+                if result.monthly_pct is not None:
+                    console.print(f"    Monthly: {result.monthly_pct}%")
+                console.print(f"    Source: {result.source}")
+            else:
+                console.print("  [red]x Query failed[/red]")
+        else:
+            pt = config["rate_provider"].get("type", "unknown")
+            console.print(f"Provider: [red]x Unsupported type '{pt}'[/red]")
+    else:
+        console.print("Provider: [yellow]o Not configured[/yellow]")
+
+    final = load_rate_limits()
+    console.print()
+    console.print("[bold]Effective result[/bold]")
+    if final:
+        parts = []
+        if final.five_hour_pct is not None:
+            parts.append(f"5h={final.five_hour_pct:.0f}%")
+        if final.seven_day_pct is not None:
+            parts.append(f"7d={final.seven_day_pct:.0f}%")
+        if final.monthly_pct is not None:
+            parts.append(f"Monthly={final.monthly_pct:.0f}%")
+        if parts:
+            console.print(f"  [green]v[/green] {', '.join(parts)}")
+        else:
+            console.print("  [yellow]o[/yellow] No effective quota data")
+        if final.model:
+            console.print(f"  Model/Source: {final.model}")
+    else:
+        console.print("  [yellow]o[/yellow] No data")
+
+
 def main():
     # --mock：本地开发演示，加载 mock/ 假数据再走正常报表流程（mock/ 在 .gitignore）
     if "--mock" in sys.argv:
@@ -374,6 +461,11 @@ def main():
     if command in ("--version", "-v", "-V"):
         print(f"token-tracker {_get_version()}")
         print("by stormzhang · https://github.com/stormzhang/token-tracker")
+        return
+
+    # 配额诊断：独立于 setup/auto-update，纯粹查询配置和数据源状态
+    if command == "quota":
+        _cmd_quota(args[1:])
         return
 
     if command == "theme":

@@ -124,6 +124,8 @@ class RateLimits:
     five_hour_resets_at: int | None = None
     seven_day_pct: float | None = None
     seven_day_resets_at: int | None = None
+    monthly_pct: float | None = None
+    monthly_resets_at: int | None = None
     model: str = ""
     plan_type: str = ""
     context_window: int | None = None

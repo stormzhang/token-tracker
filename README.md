@@ -106,6 +106,7 @@ tt status         # 过去 5h 实时面板
 tt weekly         # 周报
 tt monthly        # 月报
 tt sessions       # 最近 20 条会话明细（tt sessions <n> 改条数、--sort 改排序）
+tt quota          # 第三方配额提供者诊断
 tt theme          # 查看 / 切换配色主题（show / list / set / preview）
 tt unsetup        # 卸载并恢复安装前的配置
 tt --version      # 查看版本（-v / -V 同义）
@@ -135,6 +136,128 @@ tt monthly --theme nord  # 任意报表临时换主题渲染（不持久化、�
 
 - 切换持久化到 `~/.config/token-tracker/config.json`；优先级 `--theme` 参数 > `TT_THEME` 环境变量 > 配置文件 > 自动。
 - 终端支持 truecolor 用精确配色；不支持的（如 macOS 自带 Terminal.app）自动降级到 **256 色近似**。
+
+## 第三方配额对接
+
+通过 API Key 使用第三方平台（如 OpenCode 等）时，CC 不自动注入配额数据。Token Tracker 提供可扩展的 Provider 架构，通过外部脚本对接第三方平台的套餐用量。
+
+### 配置方式
+
+在 `~/.claude/tt-config.json` 中配置配额提供者：
+
+```json
+{
+  "rate_provider": {
+    "type": "script",
+    "command": "python ~/.claude/tt-opencode-quota.py",
+    "cache_ttl": 60,
+    "timeout": 10
+  }
+}
+```
+
+| 字段 | 默认值 | 说明 |
+|------|--------|------|
+| `type` | — | 固定为 `script` |
+| `command` | — | 要执行的命令 |
+| `cache_ttl` | `60` | 缓存秒数，避免频繁调用脚本 |
+| `timeout` | `10` | 脚本执行超时秒数 |
+
+### 脚本输出格式
+
+自定义脚本需要输出标准 JSON 格式到 stdout：
+
+```json
+{
+  "five_hour": {
+    "used_percentage": 31.5,
+    "resets_at": 1718457600
+  },
+  "seven_day": {
+    "used_percentage": 12.3,
+    "resets_at": 1718889600
+  },
+  "monthly": {
+    "used_percentage": 8.7,
+    "resets_at": 1719753600
+  },
+  "source": "OpenCode"
+}
+```
+
+各窗口字段均可选。`source` 标识来源，显示在 `tt status` 和状态栏中。
+
+### opencode 配置样例
+
+创建 `~/.claude/tt-opencode-quota.py`：
+
+```python
+#!/usr/bin/env python3
+"""opencode 用量查询脚本：GET workspace 页面 HTML，正则抠出 inline script 的三项用量。"""
+import json
+import re
+import time
+import urllib.request
+import ssl
+import sys
+
+WORKSPACE_ID = "wrk_xxxxxxxxxxxxxxxxxxxxxxxx"
+AUTH_COOKIE = "Fe26.2**xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+PAGE_URL = f"https://opencode.ai/workspace/{WORKSPACE_ID}/go"
+
+
+def fetch_usage():
+    req = urllib.request.Request(PAGE_URL, method="GET")
+    req.add_header("cookie", f"oc_locale=zh; auth={AUTH_COOKIE.strip()}")
+    req.add_header("user-agent",
+                   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                   "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36")
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        return resp.read().decode()
+
+
+def parse(html):
+    secs = re.findall(r"resetInSec:(\d+)", html)
+    pcts = re.findall(r"usagePercent:([\d.]+)", html)
+    if len(secs) < 3 or len(pcts) < 3:
+        raise ValueError("用量字段解析失败，cookie 可能已过期或页面结构变化")
+    return secs[:3], pcts[:3]
+
+
+def main():
+    now = int(time.time())
+    try:
+        html = fetch_usage()
+        secs, pcts = parse(html)
+        rolling_sec, weekly_sec, monthly_sec = (int(s) for s in secs)
+        rolling_pct, weekly_pct, monthly_pct = (float(p) for p in pcts)
+        print(json.dumps({
+            "five_hour": {"used_percentage": round(rolling_pct, 1), "resets_at": now + rolling_sec},
+            "seven_day": {"used_percentage": round(weekly_pct, 1), "resets_at": now + weekly_sec},
+            "monthly": {"used_percentage": round(monthly_pct, 1), "resets_at": now + monthly_sec},
+            "source": "OpenCode",
+        }, ensure_ascii=False))
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
+```
+
+> `auth` cookie 是 Fe26.2 加密、会过期，失效后需重新从浏览器复制覆盖。
+
+### 诊断命令
+
+配置完成后，使用诊断命令验证：
+
+```bash
+tt quota           # 查看配额状态和提供者信息
+tt quota --debug   # 详细调试信息（含脱敏后的配置内容）
+```
+
+数据优先级：官方注入配额（CC 订阅模式）> 第三方提供者 > 官方仅模型信息（降级）。CC 状态栏在检测到无官方配额时自动走 provider 链式查询。
 
 ## 高级
 
