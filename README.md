@@ -139,7 +139,7 @@ tt monthly --theme nord  # 任意报表临时换主题渲染（不持久化、�
 
 ## 第三方配额对接
 
-通过 API Key 使用第三方平台（如 OpenCode 等）时，CC / Codex 不自动注入配额数据。Token Tracker 提供可扩展的 Provider 架构，通过外部脚本对接第三方平台的套餐用量。
+通过 API Key 使用第三方平台（如 OpenCode 等）时，CC 不自动注入配额数据。Token Tracker 提供可扩展的 Provider 架构，通过外部脚本对接第三方平台的套餐用量。
 
 ### 配置方式
 

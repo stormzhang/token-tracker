@@ -139,7 +139,7 @@ tt monthly --theme nord  # render any report in a theme temporarily (no persist,
 
 ## Third-Party Quota Integration
 
-When using API keys with third-party platforms (OpenCode, etc.), CC / Codex won't inject quota data automatically. Token Tracker provides an extensible Provider architecture to fetch plan usage via external scripts.
+When using API keys with third-party platforms (OpenCode, etc.), CC won't inject quota data automatically. Token Tracker provides an extensible Provider architecture to fetch plan usage via external scripts.
 
 ### Configuration
 
