@@ -36,7 +36,7 @@ CODEX_DIR = _CODEX
 CODEX_CONFIG = os.path.join(CODEX_DIR, "config.toml")     # 改 Codex 配置，留 agent 目录
 CODEX_STATUSLINE_HOOK_PATH = os.path.join(_TT, "codex-statusline.py")
 STATUS_FILE = os.path.join(_TT, "tt-status.json")         # CC statusline 缓存（脚本写、tt status 读）
-HOOK_VERSION = "1.8"
+HOOK_VERSION = "1.9"
 STATUSLINE_HOOK_VERSION = "1.0"
 
 CC_BACKUP_PATH = os.path.join(_TT, "cc-backup.json")
@@ -394,23 +394,21 @@ def main():
 
     now = datetime.now(timezone.utc)
 
-    # 若 CC 未提供配额数据，尝试从第三方 provider 获取（外部脚本需用户自行配置）
-    rl = data.get("rate_limits") or {}
-    if not any((rl.get(k) or {}).get("used_percentage") is not None
-               for k in ("five_hour", "seven_day")):
-        try:
-            from token_tracker.adapters.rate_limits import load_rate_limits as _load_provider
-            _prov = _load_provider()
-            if _prov:
-                _prov_rl = {}
-                if _prov.five_hour_pct is not None:
-                    _prov_rl["five_hour"] = {"used_percentage": _prov.five_hour_pct, "resets_at": _prov.five_hour_resets_at}
-                if _prov.seven_day_pct is not None:
-                    _prov_rl["seven_day"] = {"used_percentage": _prov.seven_day_pct, "resets_at": _prov.seven_day_resets_at}
-                if any((_prov_rl.get(k) or {}).get("used_percentage") is not None for k in ("five_hour", "seven_day")):
-                    data["rate_limits"] = _prov_rl
-        except Exception:
-            pass
+    # 尝试从第三方 provider 获取配额数据，覆盖 CC 自身上报的配额
+    # load_rate_limits 优先返回已配置的第三方提供者数据，无则退回到官方数据
+    try:
+        from token_tracker.adapters.rate_limits import load_rate_limits as _load_provider
+        _prov = _load_provider()
+        if _prov:
+            _prov_rl = {}
+            if _prov.five_hour_pct is not None:
+                _prov_rl["five_hour"] = {"used_percentage": _prov.five_hour_pct, "resets_at": _prov.five_hour_resets_at}
+            if _prov.seven_day_pct is not None:
+                _prov_rl["seven_day"] = {"used_percentage": _prov.seven_day_pct, "resets_at": _prov.seven_day_resets_at}
+            if any((_prov_rl.get(k) or {}).get("used_percentage") is not None for k in ("five_hour", "seven_day")):
+                data["rate_limits"] = _prov_rl
+    except Exception:
+        pass
     session_id = data.get("session_id") or ""
     prev_api_ms, prev_tps, state = _read_prev(session_id)  # 覆盖前读旧帧（按会话）
     tps = _compute_tps(data, prev_api_ms, prev_tps)

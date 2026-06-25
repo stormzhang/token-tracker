@@ -73,14 +73,14 @@ def _from_provider_data(data) -> RateLimits:
 
 
 def load_rate_limits() -> RateLimits | None:
-    """链式查询配额：官方注入 → 配置的提供者 → None（降级）"""
-    # 1. 优先官方数据（如果有有效配额）
-    official = _load_official()
-    if official and (official.five_hour_pct is not None or official.seven_day_pct is not None):
-        return official
+    """链式查询配额：配置的第三方提供者 → 官方注入 → None（降级）
 
-    # 2. 尝试第三方提供者
+    当用户显式配了提供者，优先用提供者数据；配了但失败则降级到官方。
+    """
+    official = _load_official()
     config = _load_config()
+
+    # 1. 有第三方提供者时优先查询（用户配了就是想看提供者的数据）
     if config and "rate_provider" in config:
         provider = create_provider(config["rate_provider"])
         if provider:
@@ -91,5 +91,9 @@ def load_rate_limits() -> RateLimits | None:
                     result.model = official.model
                 return result
 
-    # 3. 降级：返回官方数据（即使没有配额，至少有 model 信息）
+    # 2. 降级到官方注入数据（CC 自家配额）
+    if official and (official.five_hour_pct is not None or official.seven_day_pct is not None):
+        return official
+
+    # 3. 再无数据就返回官方（至少带 model 信息）
     return official
