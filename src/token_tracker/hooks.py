@@ -838,18 +838,67 @@ def _migrate_legacy() -> None:
 
 
 def needs_update() -> bool:
-    # 只在已安装（新位置脚本文件存在）时纳入版本判断，未装不主动装
+    # 检查 CC 脚本版本
     if os.path.exists(HOOK_SCRIPT_PATH) and _installed_hook_version() != HOOK_VERSION:
         return True
+    # 检查 Codex 脚本版本
     sv = _installed_codex_statusline_version()
-    return sv is not None and sv != STATUSLINE_HOOK_VERSION
+    if sv is not None and sv != STATUSLINE_HOOK_VERSION:
+        return True
+    # 检查 settings.json 是否指向旧路径
+    if _cc_settings_path_stale():
+        return True
+    return False
+
+
+def _cc_settings_path_stale() -> bool:
+    """检测 settings.json 的 statusLine command 是否指向旧路径。"""
+    if not os.path.exists(CLAUDE_SETTINGS):
+        return False
+    try:
+        with open(CLAUDE_SETTINGS, encoding="utf-8") as f:
+            settings = json.load(f)
+        sl = settings.get("statusLine")
+        if not isinstance(sl, dict):
+            return False
+        cmd = sl.get("command", "")
+        if not _is_tt_cc_command(cmd):
+            return False
+        expected_cmd = f"{sys.executable or 'python3'} {HOOK_SCRIPT_PATH}"
+        return cmd != expected_cmd
+    except (OSError, json.JSONDecodeError):
+        return False
+
+
+def _fix_cc_settings_path() -> None:
+    """修复 settings.json 的 statusLine command 到当前脚本路径。"""
+    if not os.path.exists(CLAUDE_SETTINGS):
+        return
+    try:
+        with open(CLAUDE_SETTINGS, encoding="utf-8") as f:
+            settings = json.load(f)
+        sl = settings.get("statusLine")
+        if not isinstance(sl, dict):
+            return
+        cmd = sl.get("command", "")
+        if not _is_tt_cc_command(cmd):
+            return
+        expected_cmd = f"{sys.executable or 'python3'} {HOOK_SCRIPT_PATH}"
+        if cmd == expected_cmd:
+            return
+        settings["statusLine"] = {"type": "command", "command": expected_cmd}
+        with open(CLAUDE_SETTINGS, "w", encoding="utf-8") as f:
+            json.dump(settings, f, indent=2, ensure_ascii=False)
+    except (OSError, json.JSONDecodeError):
+        pass
 
 
 def update_hook() -> None:
-    if os.path.exists(HOOK_SCRIPT_PATH):  # 已装才同步（未装不主动装）
+    if os.path.exists(HOOK_SCRIPT_PATH):
         _write_cc_statusline_script()
     if _installed_codex_statusline_version() is not None:
         _write_codex_statusline_script()
+    _fix_cc_settings_path()
 
 
 # --- setup ---
