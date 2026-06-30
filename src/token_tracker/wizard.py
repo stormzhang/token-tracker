@@ -181,32 +181,41 @@ def ask_components(step_prefix_fn: Callable[[int], str] | None = None) -> SetupC
     step_prefix_fn(i) 返回第 i 个问题的步骤前缀（i 从 1 开始）；不传则无前缀。
     语言由调用方（wizard）在更早的步骤问过，这里不重复。
     """
+    has_cc = _has_cc()
     has_codex = _has_codex()
     qi = 1
-    codex_faux = True  # 固定默认 Yes（推荐项）：每次都从 Yes 起、不被上次选择带偏
+    claude_sl = False
+    codex_faux = False
     prefix = step_prefix_fn or (lambda i: "")
 
-    # Q1: Codex 伪 statusline（仅 Codex 存在）
+    if has_cc:
+        claude_sl = _ask_yes_no(f"{prefix(qi)}{t('wizard_q_claude_statusline')}", default=claude_sl)
+        qi += 1
+
     if has_codex:
         codex_faux = _ask_yes_no(f"{prefix(qi)}{t('wizard_q_codex_statusline')}", default=codex_faux)
+        qi += 1
 
-    return SetupComponents(codex_faux_statusline=codex_faux)
+    return SetupComponents(claude_statusline=claude_sl, codex_faux_statusline=codex_faux)
 
 
 def _print_summary(console, choice: str, components: SetupComponents) -> None:
     """选完所有项后的综合简洁总结：键值对齐的配置回顾 + 一行重启/下一步提示。
     层次：暗色标签 + 值正常色、状态用 ✓/✗ 图标、✓ 配置完成头用绿。
-    Codex 状态栏显示用双因素（意图 AND 文件存在）。"""
-    from .hooks import codex_statusline_active  # 延迟 import 避免循环
+    状态栏显示用双因素（意图 AND 文件存在）。"""
+    from .hooks import claude_statusline_active, codex_statusline_active  # 延迟 import 避免循环
     base = themes.get_theme("mocha")["base"]
     green, pink, dim = base["green"], base["pink"], base["overlay0"]
     lang_name = "中文" if i18n.LANG == "zh" else "English"  # 语言名本身不翻译
 
     rows = [(t("wizard_summary_lang"), lang_name), (t("wizard_summary_theme"), choice)]
+    if _has_cc():
+        state = f"[{green}]✓[/{green}]" if claude_statusline_active() else f"[{dim}]✗[/{dim}]"
+        rows.append((t("wizard_summary_claude_statusline"), state))
     if _has_codex():
         # 双因素（意图 AND 文件实装）；_setup_codex 已写入意图，此处直接查 active
         state = f"[{green}]✓[/{green}]" if codex_statusline_active() else f"[{dim}]✗[/{dim}]"
-        rows.append((t("wizard_summary_statusline"), state))
+        rows.append((t("wizard_summary_codex_statusline"), state))
     key_w = max(_disp_width(k) for k, _ in rows)
 
     console.print()
@@ -227,10 +236,11 @@ def run_wizard() -> None:
     from .cli import _get_version
 
     console = get_console()
+    has_cc = _has_cc()
     has_codex = _has_codex()
 
     # 总步数：语言 + 主题 + 增强项问题数（按检测到的 agent 决定）
-    enhancement_q = 1 if has_codex else 0
+    enhancement_q = (1 if has_cc else 0) + (1 if has_codex else 0)
     total = 2 + enhancement_q
 
     # 欢迎行（品牌 + 版本，缩进 2）固定英文不随语言；署名移到末尾 sign-off 行；下一行显示检测到的 agent

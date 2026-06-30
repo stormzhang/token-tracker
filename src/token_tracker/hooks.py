@@ -18,12 +18,17 @@ _CODEX = codex_home()    # CODEX_HOME 覆盖 / ~/.codex
 
 @dataclass
 class SetupComponents:
-    """组件开关。状态栏总装（不可关，是 setup 的核心目的）；可选项为 Codex 伪 statusline（Stop hook）。"""
-    codex_faux_statusline: bool = True
+    """组件开关。默认纯报表模式；状态栏集成必须显式开启。"""
+    claude_statusline: bool = False
+    codex_faux_statusline: bool = False
+
+    @classmethod
+    def defaults(cls) -> "SetupComponents":
+        return cls()
 
     @classmethod
     def all_on(cls) -> "SetupComponents":
-        return cls(codex_faux_statusline=True)
+        return cls(claude_statusline=True, codex_faux_statusline=True)
 
 # tt 自己的产物（statusline 脚本 + 缓存 + 备份）集中放 ~/.config/token-tracker（XDG，跟 theme/lang 同处）；
 # settings.json / config.toml 是「改 agent 自己的配置」、必须留 agent 目录。statusLine/hook 的 command
@@ -778,21 +783,48 @@ def codex_statusline_active() -> bool:
         return False
 
 
+def _codex_statusline_configured() -> bool:
+    try:
+        with open(CODEX_CONFIG, encoding="utf-8") as f:
+            return _has_tt_codex_statusline(f.read())
+    except OSError:
+        return False
+
+
+def claude_statusline_active() -> bool:
+    """双因素：用户意图（config）AND Claude settings 指向 tt statusLine。"""
+    if config.claude_statusline_intent() is not True:
+        return False
+    try:
+        with open(CLAUDE_SETTINGS, encoding="utf-8") as f:
+            settings = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return False
+    sl = settings.get("statusLine")
+    return isinstance(sl, dict) and _is_tt_cc_command(sl.get("command") or "")
+
+
+def _claude_statusline_configured() -> bool:
+    try:
+        with open(CLAUDE_SETTINGS, encoding="utf-8") as f:
+            settings = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return False
+    sl = settings.get("statusLine")
+    return isinstance(sl, dict) and _is_tt_cc_command(sl.get("command") or "")
+
+
 def is_setup() -> bool:
-    """已配置 = CC 端 statusLine 指我们脚本（如装了 CC）AND Codex 端意图明确（如装了 Codex）。
-    Codex 端意图为 True 时还要文件实装好；意图 False 则用户明确不要、不强求文件存在。"""
+    """已初始化 = 对已安装的 agent 均记录了组件意图；启用的组件还必须实际装好。"""
     has_cc = os.path.isdir(os.path.dirname(CLAUDE_SETTINGS))
     has_codex = os.path.isdir(CODEX_DIR)
     if not has_cc and not has_codex:
         return False
     if has_cc:
-        try:
-            with open(CLAUDE_SETTINGS, encoding="utf-8") as f:
-                settings = json.load(f)
-            sl = settings.get("statusLine")
-            if not isinstance(sl, dict) or not _is_tt_cc_command(sl.get("command") or ""):
-                return False
-        except (OSError, json.JSONDecodeError):
+        intent = config.claude_statusline_intent()
+        if intent is None:
+            return False
+        if intent and not claude_statusline_active():
             return False
     if has_codex:
         intent = config.codex_faux_statusline_intent()
@@ -896,31 +928,43 @@ def _sync_cc_command() -> None:
 
 
 def needs_update() -> bool:
-    # 只在已安装（新位置脚本文件存在）时纳入版本判断，未装不主动装
-    if os.path.exists(HOOK_SCRIPT_PATH) and _installed_hook_version() != HOOK_VERSION:
+    # 只在实际接管了 agent 配置时纳入版本判断，未接管不主动写脚本/配置。
+    if _claude_statusline_configured() and os.path.exists(HOOK_SCRIPT_PATH) and _installed_hook_version() != HOOK_VERSION:
         return True
-    sv = _installed_codex_statusline_version()
+    sv = _installed_codex_statusline_version() if _codex_statusline_configured() else None
     if sv is not None and sv != STATUSLINE_HOOK_VERSION:
         return True
     return _cc_command_needs_sync()  # settings.json 里 command 格式过时也算待更新（issue #13/#14）
 
 
-def update_hook() -> None:
-    if os.path.exists(HOOK_SCRIPT_PATH):  # 已装才同步（未装不主动装）
+def update_hook() -> bool:
+    updated = False
+    if _claude_statusline_configured() and os.path.exists(HOOK_SCRIPT_PATH):  # 已接管才同步（未接管不主动装）
         _write_cc_statusline_script()
-    if _installed_codex_statusline_version() is not None:
+        updated = True
+    if _codex_statusline_configured() and _installed_codex_statusline_version() is not None:
         _write_codex_statusline_script()
+        updated = True
     if _cc_command_needs_sync():
         _sync_cc_command()
+        updated = True
+    return updated
 
 
 # --- setup ---
 
 def setup(auto: bool = False, components: SetupComponents | None = None, quiet: bool = False) -> None:
-    """安装状态栏 + 可选组件。components=None 表示全装（向后兼容）。
+    """初始化 tt 配置，并按组件意图安装/移除状态栏集成。components=None 表示纯报表模式。
     quiet=True 时不打任何提示（wizard 场景：由 wizard 末尾给一次综合总结）。"""
     if components is None:
-        components = SetupComponents.all_on()
+        components = (
+            SetupComponents(
+                claude_statusline=config.claude_statusline_intent() is True or _claude_statusline_configured(),
+                codex_faux_statusline=config.codex_faux_statusline_intent() is True or _codex_statusline_configured(),
+            )
+            if auto
+            else SetupComponents.defaults()
+        )
     p = (lambda *a, **k: None) if quiet else get_console().print
 
     has_cc = os.path.isdir(os.path.dirname(CLAUDE_SETTINGS))
@@ -937,7 +981,11 @@ def setup(auto: bool = False, components: SetupComponents | None = None, quiet: 
     _migrate_legacy()                # 删旧位置（agent 根目录）残留，迁到 ~/.config/token-tracker
 
     if has_cc:
-        _setup_claude(quiet)
+        config.save_claude_statusline(components.claude_statusline)
+        if components.claude_statusline:
+            _setup_claude(quiet)
+        else:
+            _unsetup_claude(quiet)
     else:
         if not auto:
             p(f"[dim]{t('cc_not_found')}[/dim]")
@@ -996,15 +1044,17 @@ def _setup_codex(components: SetupComponents, quiet: bool = False) -> None:
     """Codex 端只装/卸伪 statusline hook，**不再动 [tui].status_line**——伪 statusline 比官方更全。
     用户意图（components.codex_faux_statusline）也写入 config.json，给 wizard 总结 / is_setup 用。"""
     p = (lambda *a, **k: None) if quiet else get_console().print
+    config.save_codex_faux_statusline(components.codex_faux_statusline)  # 写入意图
+
     result = _read_codex_config()
     if result:
         content, _parsed = result
     elif os.path.isdir(CODEX_DIR):
-        content = ""  # 装了 Codex 但还没 config.toml → 新建
+        if not components.codex_faux_statusline:
+            return  # 纯报表模式：没有 config.toml 就不要为了 opt-out 创建空文件
+        content = ""  # 装了 Codex 但还没 config.toml → 开启伪 statusline 时创建
     else:
         return
-
-    config.save_codex_faux_statusline(components.codex_faux_statusline)  # 写入意图
 
     python = sys.executable or "python3"
     if components.codex_faux_statusline:
@@ -1028,18 +1078,21 @@ def unsetup() -> None:
     has_codex = os.path.isdir(CODEX_DIR)
 
     if has_cc:
+        config.save_claude_statusline(False)
         _unsetup_claude()
     if has_codex:
+        config.save_codex_faux_statusline(False)
         _unsetup_codex()
     if not has_cc and not has_codex:
         get_console().print(f"[dim]{t('no_agent_detected')}[/dim]")
 
 
-def _unsetup_claude() -> None:
+def _unsetup_claude(quiet: bool = False) -> None:
+    p = (lambda *a, **k: None) if quiet else get_console().print
     _migrate_legacy()  # 顺手清旧位置残留（老用户 unsetup 时也清）
     if os.path.exists(HOOK_SCRIPT_PATH):
         os.remove(HOOK_SCRIPT_PATH)
-        get_console().print(f"[green]✓[/green] {t('deleted_file', path=HOOK_SCRIPT_PATH)}")
+        p(f"[green]✓[/green] {t('deleted_file', path=HOOK_SCRIPT_PATH)}")
 
     if not os.path.exists(CLAUDE_SETTINGS):
         return
@@ -1056,14 +1109,14 @@ def _unsetup_claude() -> None:
             os.remove(CC_BACKUP_PATH)
         if isinstance(previous, dict):
             settings["statusLine"] = previous
-            get_console().print(f"[green]✓[/green] {t('cc_restored')}")
+            p(f"[green]✓[/green] {t('cc_restored')}")
         else:
             settings.pop("statusLine", None)
-            get_console().print(f"[green]✓[/green] {t('cc_removed')}")
+            p(f"[green]✓[/green] {t('cc_removed')}")
         settings.pop("tokenTracker", None)  # 顺手清掉老用户在 settings 里的子字段残留
         if os.path.exists(STATUS_FILE):
             os.remove(STATUS_FILE)
-            get_console().print(f"[green]✓[/green] {t('deleted_cache', path=STATUS_FILE)}")
+            p(f"[green]✓[/green] {t('deleted_cache', path=STATUS_FILE)}")
 
     with open(CLAUDE_SETTINGS, "w", encoding="utf-8") as f:
         json.dump(settings, f, indent=2, ensure_ascii=False)

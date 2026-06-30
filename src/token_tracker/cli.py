@@ -17,7 +17,7 @@ from .analyzer.aggregator import (
     aggregate_weekly,
 )
 from .analyzer.cost import calculate_cost
-from .hooks import is_setup, needs_update, setup, unsetup, update_hook
+from .hooks import needs_update, setup, unsetup, update_hook
 from .i18n import t
 from .ui import theme, themes
 from .ui.console import forced_color_console, get_console
@@ -222,14 +222,13 @@ def _is_tty() -> bool:
 
 
 def _should_run_wizard() -> bool:
-    """是否进交互向导：必须双 tty 且不在 AI 会话内（否则走 _auto_setup 非交互全装）。"""
+    """是否进交互向导：必须双 tty 且不在 AI 会话内（否则走 _auto_setup 非交互初始化）。"""
     return _is_tty() and not _current_session_agent()
 
 
 def _run_setup_flow() -> None:
     """配置流程**单一入口**：先确认装了至少一个 agent（detect_agents 守卫只此一处），
-    再按环境分流——双 tty 非会话内进交互向导，否则非交互默认全装。
-    `tt setup` 与首次运行「没配过」时都走这里。"""
+    再按环境分流——双 tty 非会话内进交互向导，否则非交互默认纯报表模式。"""
     if not detect_agents():
         get_console().print(f"[red]{t('no_agent_install')}[/red]")
         return
@@ -241,8 +240,8 @@ def _run_setup_flow() -> None:
 
 
 def _auto_setup() -> None:
-    """非交互环境（非 tty / CI / 会话内）：默认全装——语言跟随**系统设置**（绕过 CLI LANG）、
-    主题 mocha、组件全开。仅当用户从未配置过语言/主题时落默认（不覆盖已有选择）。
+    """非交互环境（非 tty / CI / 会话内）：默认只初始化配置——语言跟随**系统设置**（绕过 CLI LANG）、
+    主题 mocha、状态栏组件全关。仅当用户从未配置过语言/主题时落默认（不覆盖已有选择）。
     agent 守卫在 _run_setup_flow 已做，这里假设至少有一个 agent。"""
     if config.resolve_lang() is None:
         sys_lang = i18n._detect_system_lang()
@@ -250,7 +249,7 @@ def _auto_setup() -> None:
         i18n.set_lang(sys_lang)
     if not config.load_config().get("theme"):
         config.save_theme("mocha")
-    setup(auto=True)  # 组件默认全开
+    setup(auto=True)  # 组件默认全关，避免非交互安装接管用户状态栏
     get_console().print(f"[dim]{t('auto_setup_hint')}[/dim]")
 
 
@@ -320,8 +319,7 @@ def _theme_set(name: str) -> None:
     config.save_theme(name)
     theme.set_active_theme(name)
     console.print(t("theme_set_ok", name=name))
-    if is_setup():
-        update_hook()
+    if update_hook():
         console.print(f"[dim]{t('theme_set_statusline')}[/dim]")
     if config.resolve_theme() != name:
         console.print(f"[yellow]{t('theme_env_override')}[/yellow]")
@@ -380,21 +378,9 @@ def main():
         cmd_theme(args[1:])
         return
 
-    # 已配置过的情况下，任意命令都顺带同步状态栏脚本（setup/unsetup 自行处理）
-    # 避免升级 pip 包后忘了 tt setup，导致 ~/.claude/tt-statusline.py 停在旧版本
-    if command not in ("setup", "unsetup") and is_setup() and needs_update():
+    # 任意命令都可顺带同步已接管的状态栏脚本；未接管时 needs_update() 不会主动写配置。
+    if command not in ("setup", "unsetup") and needs_update():
         update_hook()
-
-    # 升级感知：新版若新增了值得重配的选项（SETUP_VERSION bump），老用户跑任意命令时
-    # 自动走一遍 setup——_run_setup_flow 内部分流：真终端弹 wizard、会话内 / 非 tty 静默
-    # _auto_setup 用默认值全装（语言跟随系统 / mocha / 组件全开）。两者最终都 save_setup_version()，
-    # 下次启动 setup_version 已是最新、不再触发。
-    if (
-        command not in ("setup", "unsetup")
-        and is_setup()
-        and config.setup_version() < config.SETUP_VERSION
-    ):
-        _run_setup_flow()
 
     if command == "setup":
         _run_setup_flow()
@@ -403,14 +389,15 @@ def main():
         unsetup()
         return
 
-    # 数据命令只看「配没配过」：没配过 → 走 setup 流程（装没装 agent 的检测都在那），
-    # 引导后仍未配置（零 agent / 用户取消）→ 退出。配过则直接往下拿 agents 跑。
-    if not is_setup():
-        _run_setup_flow()
-        if not is_setup():
-            sys.exit(1)
+    if command not in ("status", "dashboard") and command not in _REPORT_COMMANDS:
+        get_console().print(f"[red]{t('unknown_cmd', cmd=command)}[/red]")
+        get_console().print(f"[dim]{t('available_cmds')}[/dim]")
+        sys.exit(1)
 
     agents = detect_agents()
+    if not agents:
+        get_console().print(f"[red]{t('no_agent_install')}[/red]")
+        sys.exit(1)
     agent_ids = {a.id for a in agents}
 
     if command in ("status", "dashboard"):
@@ -422,11 +409,6 @@ def main():
         return
 
     rest_args, sort_key, sort_desc = _parse_sort_args(args[1:])
-
-    if command not in _REPORT_COMMANDS:
-        get_console().print(f"[red]{t('unknown_cmd', cmd=command)}[/red]")
-        get_console().print(f"[dim]{t('available_cmds')}[/dim]")
-        sys.exit(1)
 
     # daily / weekly 跟随当前会话：CC 会话只看 CC、Codex 会话只看 Codex；
     # 独立终端（识别不到会话）保持合并所有 agent。

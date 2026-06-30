@@ -2,6 +2,22 @@ from token_tracker import cli
 from token_tracker.adapters.types import DailyStats
 
 
+def test_status_command_does_not_require_setup(monkeypatch):
+    from types import SimpleNamespace
+
+    calls: dict = {}
+    monkeypatch.setattr(cli, "needs_update", lambda: False)
+    monkeypatch.setattr(cli, "_run_setup_flow", lambda: calls.__setitem__("setup", True))
+    monkeypatch.setattr(cli, "detect_agents", lambda: [SimpleNamespace(id="claude-code", name="Claude Code")])
+    monkeypatch.setattr(cli, "_build_status_data", lambda _agents: {"payload": True})
+    monkeypatch.setattr(cli, "render_status", lambda **_kwargs: calls.__setitem__("render", True))
+    monkeypatch.setattr("sys.argv", ["tt", "status"])
+
+    cli.main()
+
+    assert calls == {"render": True}
+
+
 def test_apply_sort_by_tokens_uses_authoritative_attr():
     stats = [
         DailyStats(date="2026-01-01", total_tokens=10),

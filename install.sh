@@ -155,15 +155,15 @@ elif [ -n "$NEW_REAL" ]; then
     fi
 fi
 
-# 跑配置向导：用 tt 绝对路径调，避免 PATH 尚未更新时 command not found。
+# 跑非交互初始化：用 tt 绝对路径调，避免 PATH 尚未更新时 command not found。
 # 不把 stdin 重定向到 /dev/tty——curl|bash 下 bash 没 controlling terminal，
 # 这种「pipe stdin → /dev/tty 重定向」会触发 prompt_toolkit issue #1943（kqueue
 # 注册 fd 失败 OSError [Errno 22]）。改用：让 tt setup 看到 non-tty stdin →
-# 自动走 _auto_setup 默认全装（语言跟随系统 / mocha / 组件全开），不崩。
-# 想自定义的用户末尾会看到明确提示，去独立终端跑 `tt setup` 即可。
+# 自动走 _auto_setup 默认纯报表模式（语言跟随系统 / mocha / 不接管状态栏），不崩。
+# 想启用状态栏集成的用户，可去独立终端跑 `tt setup`。
 say ""
-say "Configuring status bar..."
+say "Initializing token-tracker..."
 "$TT_BIN" setup
 
 say ""
-say "Done! Run 'tt' to start."
+say "Done! Run 'tt' to start. Run 'tt setup' in a terminal to enable statusline integrations."

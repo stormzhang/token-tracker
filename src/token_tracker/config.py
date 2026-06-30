@@ -157,6 +157,17 @@ def codex_faux_statusline_intent() -> bool | None:
     return val if isinstance(val, bool) else None
 
 
+def save_claude_statusline(enabled: bool) -> None:
+    """保存用户对 Claude Code statusLine 接管的意图。"""
+    _save_field("claude_statusline", bool(enabled))
+
+
+def claude_statusline_intent() -> bool | None:
+    """读用户对 Claude Code statusLine 接管的意图。严格 bool；非 bool / 缺字段 → None。"""
+    val = load_config().get("claude_statusline")
+    return val if isinstance(val, bool) else None
+
+
 # --- setup 引导版本（老用户升级后重新引导一次的判定依据） ---
 
 

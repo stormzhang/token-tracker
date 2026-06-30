@@ -151,9 +151,10 @@ The first time you run `tt` (or run `tt setup` in a standalone terminal), an **i
 
 1. **Pick a language** — 中文 / English (saved to `~/.config/token-tracker/config.json`)
 2. **Pick a color theme** — 6 themes with an inline color swatch on each option
-3. **Enable Codex faux statusline** — Yes/No (only when Codex is detected)
+3. **Take over Claude Code statusLine** — Yes/No (only when Claude Code is detected, default No)
+4. **Enable Codex faux statusline** — Yes/No (only when Codex is detected, default No)
 
-CI / non-tty environments (Docker / scripts / `curl|bash`) auto-install with defaults: **language follows the system setting**, theme mocha, all components on. To change anything later, just run `tt setup` again.
+CI / non-tty environments (Docker / scripts / `curl|bash`) initialize with defaults: **language follows the system setting**, theme mocha, and **no statusline takeover**. To enable statusline integrations, run `tt setup` in a standalone terminal and opt in.
 
 ### Report Sorting
 

@@ -119,15 +119,20 @@ def test_codex_statusline_version_roundtrip(tmp_path, monkeypatch):
     assert hooks._installed_codex_statusline_version() == hooks.STATUSLINE_HOOK_VERSION
 
 
-def test_setup_components_defaults_all_on():
-    # 不传 components 时 setup() 应等价于全装；SetupComponents 默认值也是全开。
+def test_setup_components_defaults_all_off():
+    # 默认是纯报表模式；状态栏集成必须显式开启。
     c = hooks.SetupComponents()
-    assert c.codex_faux_statusline is True
-    assert hooks.SetupComponents.all_on() == c
+    assert c.claude_statusline is False
+    assert c.codex_faux_statusline is False
+    assert hooks.SetupComponents.defaults() == c
+    assert hooks.SetupComponents.all_on() == hooks.SetupComponents(
+        claude_statusline=True,
+        codex_faux_statusline=True,
+    )
 
 
 def test_setup_components_off_skips_install(tmp_path, monkeypatch):
-    # codex_faux_statusline=False → Codex 伪 statusline 不装。
+    # 默认 setup 是纯报表模式：不接管 CC statusLine、不装 Codex 伪 statusline。
     # 隔离 HOME，避免污染主人真实 ~/.claude / ~/.codex
     home = tmp_path / "home"
     (home / ".claude").mkdir(parents=True)
@@ -142,14 +147,80 @@ def test_setup_components_off_skips_install(tmp_path, monkeypatch):
     monkeypatch.setattr(hooks, "CODEX_CONFIG", str(codex_config))
     monkeypatch.setattr(hooks, "CODEX_STATUSLINE_HOOK_PATH", str(home / ".codex" / "tt-statusline.py"))
 
-    hooks.setup(components=hooks.SetupComponents(codex_faux_statusline=False))
+    hooks.setup(components=hooks.SetupComponents())
 
-    # CC statusline 仍装（command 现在带引号包裹，issue #13 修复）
-    assert json.loads(settings_path.read_text())["statusLine"]["command"].endswith('tt-statusline.py"')
-    # Codex 端：不再动 [tui].status_line（保持用户原配置）；Stop hook（tt-statusline）也不在 config 里
+    assert "statusLine" not in json.loads(settings_path.read_text())
     codex_content = codex_config.read_text()
     assert "status_line = []" in codex_content  # 用户原 status_line 没被动
     assert "tt-statusline" not in codex_content   # Codex 伪 statusline hook 段未追加
+
+
+def test_setup_all_on_installs_both_statuslines(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    (home / ".claude").mkdir(parents=True)
+    (home / ".codex").mkdir(parents=True)
+    settings_path = home / ".claude" / "settings.json"
+    settings_path.write_text("{}", encoding="utf-8")
+    codex_config = home / ".codex" / "config.toml"
+    codex_config.write_text("[tui]\nstatus_line = []\n", encoding="utf-8")
+    monkeypatch.setattr(hooks, "CLAUDE_SETTINGS", str(settings_path))
+    monkeypatch.setattr(hooks, "HOOK_SCRIPT_PATH", str(home / ".claude" / "tt-statusline.py"))
+    monkeypatch.setattr(hooks, "CODEX_DIR", str(home / ".codex"))
+    monkeypatch.setattr(hooks, "CODEX_CONFIG", str(codex_config))
+    monkeypatch.setattr(hooks, "CODEX_STATUSLINE_HOOK_PATH", str(home / ".codex" / "tt-statusline.py"))
+
+    hooks.setup(components=hooks.SetupComponents.all_on(), quiet=True)
+
+    assert json.loads(settings_path.read_text())["statusLine"]["command"].endswith('tt-statusline.py"')
+    assert "tt-statusline" in codex_config.read_text()
+
+
+def test_claude_opt_out_preserves_custom_statusline(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    (home / ".claude").mkdir(parents=True)
+    settings_path = home / ".claude" / "settings.json"
+    original = {"statusLine": {"type": "command", "command": "/usr/bin/my-statusline"}}
+    settings_path.write_text(json.dumps(original), encoding="utf-8")
+    monkeypatch.setattr(hooks, "CLAUDE_SETTINGS", str(settings_path))
+    monkeypatch.setattr(hooks, "HOOK_SCRIPT_PATH", str(home / ".config" / "tt-statusline.py"))
+
+    hooks.setup(components=hooks.SetupComponents(claude_statusline=False), quiet=True)
+
+    assert json.loads(settings_path.read_text()) == original
+    assert not (home / ".config" / "tt-statusline.py").exists()
+
+
+def test_auto_setup_preserves_existing_tt_statuslines(tmp_path, monkeypatch):
+    # 非交互安装/升级默认不接管新用户；但老用户已经被 tt 接管时应保留并同步 intent。
+    from token_tracker import config
+
+    home = tmp_path / "home"
+    (home / ".claude").mkdir(parents=True)
+    (home / ".codex").mkdir(parents=True)
+    settings_path = home / ".claude" / "settings.json"
+    settings_path.write_text(json.dumps({
+        "statusLine": {"type": "command", "command": "/old/python claude-statusline.py"},
+    }), encoding="utf-8")
+    codex_config = home / ".codex" / "config.toml"
+    codex_config.write_text(
+        "[[hooks.Stop]]\n\n[[hooks.Stop.hooks]]\n"
+        "type = \"command\"\ncommand = \"python codex-statusline.py\"\ntimeout = 10\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(hooks, "CLAUDE_SETTINGS", str(settings_path))
+    monkeypatch.setattr(hooks, "HOOK_SCRIPT_PATH", str(home / ".config" / "claude-statusline.py"))
+    monkeypatch.setattr(hooks, "CODEX_DIR", str(home / ".codex"))
+    monkeypatch.setattr(hooks, "CODEX_CONFIG", str(codex_config))
+    monkeypatch.setattr(hooks, "CODEX_STATUSLINE_HOOK_PATH", str(home / ".config" / "codex-statusline.py"))
+    _isolate_config(monkeypatch, tmp_path / "cfg")
+    (home / ".config").mkdir(parents=True)
+
+    hooks.setup(auto=True, quiet=True)
+
+    assert config.claude_statusline_intent() is True
+    assert config.codex_faux_statusline_intent() is True
+    assert "claude-statusline.py" in json.loads(settings_path.read_text())["statusLine"]["command"]
+    assert "codex-statusline.py" in codex_config.read_text()
 
 
 def test_cli_setup_wizard_or_auto(monkeypatch):
@@ -161,7 +232,6 @@ def test_cli_setup_wizard_or_auto(monkeypatch):
                         lambda: [SimpleNamespace(name="Claude Code", id="claude-code")])  # 有 agent
     monkeypatch.setattr(wizard, "run_wizard", lambda: calls.__setitem__("wizard", True))
     monkeypatch.setattr(cli, "_auto_setup", lambda: calls.__setitem__("auto", True))
-    monkeypatch.setattr(cli, "is_setup", lambda: True)
     monkeypatch.setattr(cli, "needs_update", lambda: False)
     monkeypatch.setattr("sys.argv", ["tt", "setup"])
 
@@ -182,7 +252,6 @@ def test_cli_setup_flow_no_agent(monkeypatch):
     monkeypatch.setattr(cli, "detect_agents", lambda: [])  # 没装 agent
     monkeypatch.setattr(wizard, "run_wizard", lambda: calls.__setitem__("wizard", True))
     monkeypatch.setattr(cli, "_auto_setup", lambda: calls.__setitem__("auto", True))
-    monkeypatch.setattr(cli, "is_setup", lambda: False)
     monkeypatch.setattr(cli, "needs_update", lambda: False)
     monkeypatch.setattr("sys.argv", ["tt", "setup"])
     cli.main()
@@ -238,9 +307,9 @@ def test_statusline_shows_git_diff_stat(tmp_path):
 
 def _run_statusline_home(script_path, payload, home):
     """隔离 HOME 下跑落盘 statusline 脚本，返回完整 stdout（不污染真实 ~/.claude）。"""
-    env = {**os.environ, "HOME": str(home), "COLORTERM": "truecolor"}
+    env = {**os.environ, "HOME": str(home), "USERPROFILE": str(home), "COLORTERM": "truecolor"}
     r = subprocess.run([sys.executable, str(script_path)], input=json.dumps(payload),
-                       text=True, capture_output=True, env=env)
+                       text=True, capture_output=True, env=env, encoding="utf-8")
     return r.stdout
 
 
@@ -380,9 +449,8 @@ def test_statusline_progress_bar_empty_grid_tinted(tmp_path):
     assert "░" in out60 and esc.findall(out60)[-1] + "░" not in out60  # pct>0：未填充格被染色、不在 reset 后
 
 
-def test_setup_codex_creates_missing_config(tmp_path, monkeypatch):
-    # 装了 Codex（~/.codex 目录在）但还没 config.toml → setup 应创建该文件并写入伪 statusline hook。
-    # 新版不再动 [tui].status_line（伪 statusline 比官方更全）。
+def test_setup_codex_opt_out_does_not_create_missing_config(tmp_path, monkeypatch):
+    # 装了 Codex 但还没 config.toml，纯报表模式不应为了 opt-out 创建空配置文件。
     home = tmp_path / "home"
     (home / ".codex").mkdir(parents=True)  # 只有目录、无 config.toml
     codex_config = home / ".codex" / "config.toml"
@@ -393,7 +461,21 @@ def test_setup_codex_creates_missing_config(tmp_path, monkeypatch):
 
     assert not codex_config.exists()
     hooks._setup_codex(hooks.SetupComponents(), quiet=True)
-    assert codex_config.exists()  # 已创建
+    assert not codex_config.exists()
+
+
+def test_setup_codex_opt_in_creates_missing_config(tmp_path, monkeypatch):
+    # 用户显式启用 Codex 伪 statusline 时，缺失的 config.toml 才会被创建并写入 hook。
+    home = tmp_path / "home"
+    (home / ".codex").mkdir(parents=True)
+    codex_config = home / ".codex" / "config.toml"
+    monkeypatch.setattr(hooks, "CODEX_DIR", str(home / ".codex"))
+    monkeypatch.setattr(hooks, "CODEX_CONFIG", str(codex_config))
+    monkeypatch.setattr(hooks, "CODEX_STATUSLINE_HOOK_PATH", str(home / ".codex" / "tt-statusline.py"))
+    monkeypatch.setattr(hooks.config, "CONFIG_PATH", str(tmp_path / "tt-config.json"))
+
+    hooks._setup_codex(hooks.SetupComponents(codex_faux_statusline=True), quiet=True)
+    assert codex_config.exists()
     content = codex_config.read_text()
     assert "five-hour-limit" not in content  # 新版不接管 status_line
     assert "tt-statusline" in content        # 伪 statusline Stop hook 写入
@@ -445,27 +527,23 @@ def test_setup_writes_setup_version(tmp_path, monkeypatch):
     assert config.setup_version() == config.SETUP_VERSION  # setup 完成后被打上当前版本
 
 
-def test_cli_outdated_setup_triggers_setup_flow(monkeypatch, tmp_path):
-    # 老用户 is_setup=True 且 setup_version < SETUP_VERSION → 自动走 _run_setup_flow
-    # （内部分流真终端 wizard / 会话内 _auto_setup，这里只验触发、不管分流）。
+def test_cli_outdated_setup_no_longer_triggers_setup_flow(monkeypatch, tmp_path):
+    # 数据命令不再因为 setup_version 过旧自动跑 setup；报表与状态栏配置解耦。
     from token_tracker import cli, config
     _isolate_config(monkeypatch, tmp_path)
     calls: dict = {}
 
-    def fake_flow():
-        calls["flow"] = True
-        raise SystemExit(0)  # 短路 cli.main 后续数据命令逻辑
-
-    monkeypatch.setattr(cli, "_run_setup_flow", fake_flow)
-    monkeypatch.setattr(cli, "is_setup", lambda: True)
+    monkeypatch.setattr(cli, "_run_setup_flow", lambda: calls.__setitem__("flow", True))
     monkeypatch.setattr(cli, "needs_update", lambda: False)
-    # setup_version 字段缺失 → 读出 0 < SETUP_VERSION
+    monkeypatch.setattr(cli, "_build_status_data", lambda _agents: None)
+    from types import SimpleNamespace
+    monkeypatch.setattr(cli, "detect_agents",
+                        lambda: [SimpleNamespace(name="Claude Code", id="claude-code")])
     monkeypatch.setattr(config, "SETUP_VERSION", 2)
     monkeypatch.setattr("sys.argv", ["tt", "status"])
 
-    with pytest.raises(SystemExit):
-        cli.main()
-    assert calls == {"flow": True}
+    cli.main()
+    assert calls == {}
 
 
 def test_cli_setup_up_to_date_skips_flow(monkeypatch, tmp_path):
@@ -475,7 +553,6 @@ def test_cli_setup_up_to_date_skips_flow(monkeypatch, tmp_path):
     calls: dict = {}
 
     monkeypatch.setattr(cli, "_run_setup_flow", lambda: calls.__setitem__("flow", True))
-    monkeypatch.setattr(cli, "is_setup", lambda: True)
     monkeypatch.setattr(cli, "needs_update", lambda: False)
     monkeypatch.setattr(cli, "_build_status_data", lambda _agents: {})
     from types import SimpleNamespace

@@ -151,9 +151,10 @@ tt monthly --theme nord  # 任意报表临时换主题渲染（不持久化、�
 
 1. **选语言** — 中文 / English（落 `~/.config/token-tracker/config.json`）
 2. **选配色主题** — 6 套主题上下键选择，每个选项右侧内联色板预览
-3. **启用 Codex 伪 statusline** — Yes/No（仅检测到 Codex 时）
+3. **接管 Claude Code statusLine** — Yes/No（仅检测到 Claude Code 时，默认 No）
+4. **启用 Codex 伪 statusline** — Yes/No（仅检测到 Codex 时，默认 No）
 
-CI / 非 tty 环境（Docker / 脚本 / `curl|bash`）自动按默认全装：**语言跟随系统设置**、主题 mocha、组件全开。装好后想改任何一项，再跑一次 `tt setup` 即可。
+CI / 非 tty 环境（Docker / 脚本 / `curl|bash`）自动按默认初始化：**语言跟随系统设置**、主题 mocha、**不接管状态栏**。需要启用状态栏集成时，在独立终端运行 `tt setup` 并选择开启即可。
 
 ### 报告排序
 

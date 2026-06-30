@@ -150,7 +150,7 @@ def test_theme_set_writes_config(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "CONFIG_PATH", str(tmp_path / "config.json"))
     monkeypatch.setattr(config, "_LEGACY_THEME_PATH", str(tmp_path / "theme.json"))
     monkeypatch.setattr(config, "_LEGACY_LANG_PATH", str(tmp_path / "lang.json"))
-    monkeypatch.setattr(cli, "is_setup", lambda: False)  # 不触发 update_hook
+    monkeypatch.setattr(cli, "update_hook", lambda: False)
     monkeypatch.delenv("TT_THEME", raising=False)
     monkeypatch.setattr(theme, "_ACTIVE_NAME", None)
     cli.cmd_theme(["set", "nord"])
@@ -159,7 +159,7 @@ def test_theme_set_writes_config(tmp_path, monkeypatch):
 
 
 def test_theme_set_unknown_exits(monkeypatch):
-    monkeypatch.setattr(cli, "is_setup", lambda: False)
+    monkeypatch.setattr(cli, "update_hook", lambda: False)
     with pytest.raises(SystemExit):
         cli.cmd_theme(["set", "bogus"])
 
@@ -182,7 +182,7 @@ def test_cmd_theme_shorthand_set(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "CONFIG_PATH", str(tmp_path / "config.json"))
     monkeypatch.setattr(config, "_LEGACY_THEME_PATH", str(tmp_path / "theme.json"))
     monkeypatch.setattr(config, "_LEGACY_LANG_PATH", str(tmp_path / "lang.json"))
-    monkeypatch.setattr(cli, "is_setup", lambda: False)
+    monkeypatch.setattr(cli, "update_hook", lambda: False)
     monkeypatch.delenv("TT_THEME", raising=False)
     monkeypatch.setattr(theme, "_ACTIVE_NAME", None)
     cli.cmd_theme(["frappe"])
