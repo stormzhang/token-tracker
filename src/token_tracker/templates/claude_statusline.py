@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Claude Code statusLine — 状态栏显示 + 数据持久化到 tt-status.json"""
 __version__ = "__HOOK_VERSION__"
-import json, os, re, subprocess, sys, tempfile
+import json, os, re, subprocess, sys, tempfile, unicodedata
 from datetime import datetime, timezone
 
 STATUS_FILE = os.path.join(os.path.expanduser("~/.config/token-tracker"), "tt-status.json")
@@ -21,10 +21,24 @@ if sys.platform == "win32":
 
 
 def vlen(s):
-    return len(ANSI_RE.sub("", s))
+    # 显示宽度：东亚全角/宽字符占 2 列（wizard.py 已用同一规则）。项目名/分支/模型名含
+    # CJK 时，按字符数少算会让窄终端的收窄判断失准、行溢出折行——按列宽计才准。
+    return sum(2 if unicodedata.east_asian_width(ch) in ('W', 'F') else 1
+               for ch in ANSI_RE.sub("", s))
 
 
 def get_width():
+    # COLUMNS：Claude Code 会为 statusLine 子进程设置真实列宽（CC v2.1.153+）。该子进程的
+    # stdin/stderr 是管道，get_terminal_size/dev-tty 都探测不到，故优先用它。与 ui/console.py
+    # 同规矩：只认有效正整数（`!` 子进程占位的 "0"、非数字都忽略，回落原有探测链，无回归）。
+    try:
+        c = os.environ.get("COLUMNS")
+        if c and c.isdigit():
+            w = int(c)
+            if w > 0:
+                return max(1, w - 4)
+    except Exception:
+        pass
     try:
         return max(1, os.get_terminal_size(2).columns - 4)
     except Exception:
