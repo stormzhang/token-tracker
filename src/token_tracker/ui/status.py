@@ -13,6 +13,7 @@ from rich.rule import Rule
 from rich.table import Table
 from rich.text import Text
 
+from .. import config
 from ..i18n import t
 from ..tz import system_tz
 from .console import forced_color_console, get_console
@@ -29,6 +30,19 @@ from .format import (
 )
 from .tables import _bar_text
 from .theme import _S, _pct_style
+
+
+def _quota_display(pct: float) -> float:
+    if config.quota_display_mode() == config.QUOTA_DISPLAY_REMAINING:
+        return max(0.0, min(100.0, 100.0 - pct))
+    return pct
+
+
+def _quota_style(pct: float) -> str:
+    shown = _quota_display(pct)
+    if config.quota_display_mode() == config.QUOTA_DISPLAY_REMAINING:
+        return _S.bar_high if shown < 20 else _S.bar_mid if shown < 50 else _S.bar_low
+    return _pct_style(pct)
 
 
 def render_status(summary, per_agent, rate_limits, sessions, agents) -> None:
@@ -88,7 +102,8 @@ def _render_summary(summary, agents: list[str], title: str, subtitle: str | None
 
 def _render_limits(rate_limits: dict, per_agent: dict) -> None:
     """订阅额度：每 agent 一段——头行（当天 Tokens / Cost / Model）+ 5h/7d 进度条。"""
-    blocks: list = [Text("[Rate Limits]", style=f"bold {_S.good}")]
+    title = "Rate Limits: Remaining" if config.quota_display_mode() == config.QUOTA_DISPLAY_REMAINING else "Rate Limits"
+    blocks: list = [Text(f"[{title}]", style=f"bold {_S.good}")]
     for i, (agent_id, rl) in enumerate(rate_limits.items()):
         if i:  # agent 块之间空一行，避免贴太紧
             blocks.append(Text(""))
@@ -122,7 +137,8 @@ def _render_limits(rate_limits: dict, per_agent: dict) -> None:
                 reset_str = "reset --"
             else:
                 reset_str = f"reset at {datetime.fromtimestamp(resets, tz=system_tz()).strftime('%H:%M')}"
-            table.add_row(f"  {label}", f"{pct:.0f}%", _bar_text(pct / 100, _pct_style(pct)), reset_str)
+            shown = _quota_display(pct)
+            table.add_row(f"  {label}", f"{shown:.0f}%", _bar_text(shown / 100, _quota_style(pct)), reset_str)
         blocks.append(table)
     get_console().print(Padding(Group(*blocks), (0, 0, 0, 2), expand=False))
     get_console().print()

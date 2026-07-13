@@ -101,6 +101,25 @@ def test_render_status_with_limits(monkeypatch):
     assert "Claude" in out and "Codex" in out  # session Agent 列（短名 Claude / Codex）
 
 
+def test_render_status_limits_can_show_remaining(monkeypatch):
+    # quota_display=remaining 时，额度段展示剩余百分比（100 - used），并用 Remaining 标题避免误读。
+    monkeypatch.setattr("token_tracker.ui.status.forced_color_console", contextlib.nullcontext)
+    monkeypatch.setattr("token_tracker.ui.status.config.quota_display_mode", lambda: "remaining")
+    now = datetime.now(UTC)
+    summary = StatusSummary(total_tokens=1000, cost_usd=1.5, message_count=5, session_count=1)
+    rl = {"claude-code": RateLimits(five_hour_pct=38.0, seven_day_pct=51.0, model="Opus 4.8")}
+    per_agent = {"claude-code": StatusSummary(total_tokens=2_000_000, cost_usd=12.5)}
+
+    with capture_console(160) as buf:
+        render_status(summary, per_agent, rl, [_session("s1", "claude-code", "claude-opus-4-8", now, 10, 500, 2.0, 3)],
+                      ["Claude Code"])
+    out = buf.getvalue()
+
+    assert "Rate Limits: Remaining" in out
+    assert "62%" in out and "49%" in out
+    assert "38%" not in out and "51%" not in out
+
+
 def test_render_status_expired_reset_shows_dash(monkeypatch):
     # 久没用 → window 已滚但本次启动没拿到新 rate_limits（normalize_pct 把 pct 归零成 0.0、resets_at 保留旧值）。
     # 旧逻辑会显示「reset at 09:49」误导用户当成未来时间；新逻辑显示 `reset --` 让用户明白这是旧数据，

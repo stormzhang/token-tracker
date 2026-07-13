@@ -136,6 +136,26 @@ def resolve_theme() -> str:
     return _auto_theme()
 
 
+# --- quota display ---
+
+QUOTA_DISPLAY_USED = "used"
+QUOTA_DISPLAY_REMAINING = "remaining"
+QUOTA_DISPLAY_MODES = (QUOTA_DISPLAY_USED, QUOTA_DISPLAY_REMAINING)
+
+
+def save_quota_display(mode: str) -> None:
+    """保存 5h / 7d 额度展示口径：used=已使用，remaining=剩余。"""
+    if mode not in QUOTA_DISPLAY_MODES:
+        raise ValueError(f"invalid quota display mode: {mode}")
+    _save_field("quota_display", mode)
+
+
+def quota_display_mode() -> str:
+    """读额度展示口径；非法 / 缺失时保持历史行为：按已使用量展示。"""
+    val = load_config().get("quota_display")
+    return val if val in QUOTA_DISPLAY_MODES else QUOTA_DISPLAY_USED
+
+
 # --- lang ---
 
 

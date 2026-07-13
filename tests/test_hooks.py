@@ -553,6 +553,43 @@ def test_statusline_progress_bar_empty_grid_tinted(tmp_path):
     assert "░" in out60 and esc.findall(out60)[-1] + "░" not in out60  # pct>0：未填充格被染色、不在 reset 后
 
 
+def test_statusline_quota_display_remaining(tmp_path):
+    # quota_display=remaining 时，CC statusline 展示剩余百分比，前缀从 Limit 变 Left。
+    script = tmp_path / "tt-statusline.py"
+    script.write_text(hooks._render_hook_script(), encoding="utf-8")
+    home = tmp_path / "home"
+    cfg = home / ".config" / "token-tracker"
+    cfg.mkdir(parents=True)
+    (cfg / "config.json").write_text(json.dumps({"quota_display": "remaining"}), encoding="utf-8")
+    payload = {"session_id": "S1", "workspace": {"project_dir": str(tmp_path)},
+               "rate_limits": {"five_hour": {"used_percentage": 38}}}
+
+    out = _run_statusline_home(script, payload, home)
+
+    assert "Left:" in out and "62%" in out
+    assert "Limit:" not in out and "38%" not in out
+
+
+def test_codex_statusline_quota_display_remaining(tmp_path, monkeypatch):
+    # Codex 伪 statusline 同样按 config 展示剩余百分比；上下文 Ctx 仍保持 used 口径。
+    import importlib.util
+
+    script = tmp_path / "codex-statusline.py"
+    script.write_text(hooks._render_codex_statusline_hook(), encoding="utf-8")
+    home = tmp_path / "home"
+    cfg = home / ".config" / "token-tracker"
+    cfg.mkdir(parents=True)
+    (cfg / "config.json").write_text(json.dumps({"quota_display": "remaining"}), encoding="utf-8")
+    monkeypatch.setenv("HOME", str(home))
+    spec = importlib.util.spec_from_file_location("_tt_codex_sl_remaining", script)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    out = mod._render_limit("5h", 38, None, 0, mod._quota_display_mode())
+
+    assert "62%" in out and "38%" not in out
+
+
 def test_setup_codex_creates_missing_config(tmp_path, monkeypatch):
     # 装了 Codex（~/.codex 目录在）但还没 config.toml → setup 应创建该文件并写入伪 statusline hook。
     # 新版不再动 [tui].status_line（伪 statusline 比官方更全）。
