@@ -10,7 +10,7 @@ _STRINGS = {
         "unknown_cmd": "未知命令: {cmd}",
         "agent_filter_conflict": "--claude 与 --codex 互斥，只能指定其中一个",
         "agent_not_detected": "未检测到 {flag} 的使用数据，请先在该 agent 中使用后再查询",
-        "available_cmds": "可用命令: status, daily, weekly, monthly, sessions, theme, setup, unsetup, --version",
+        "available_cmds": "可用命令: status, daily, weekly, monthly, sessions, theme, quota, setup, unsetup, --version",
         # --- status.py（会话表列名与 tips）---
         "recent_sessions": "最近会话",
         "sessions_tips": "Tips: tt sessions <N> 调数量 · --sort cost|tokens|time|messages · --asc/--desc 改排序",
@@ -39,6 +39,12 @@ _STRINGS = {
         "theme_set_statusline": "状态栏已重新生成，重启会话后生效",
         "theme_env_override": "注意：环境变量 TT_THEME 已设置，会覆盖此次切换",
         "theme_usage": "用法: tt theme [show | list | set <主题名> | preview <主题名>]",
+        # --- quota display (cli.py) ---
+        "quota_usage": "用法: tt quota [show | used | remaining]",
+        "quota_current": "当前额度展示: {mode}",
+        "quota_used": "已使用量",
+        "quota_remaining": "剩余量",
+        "quota_set_ok": "额度展示已切换为{mode}",
         # --- wizard (wizard.py) ---
         "wizard_pick_theme": "选择配色主题",
         "wizard_theme_prompt": "选择主题",
@@ -86,7 +92,7 @@ _STRINGS = {
         "unknown_cmd": "Unknown command: {cmd}",
         "agent_filter_conflict": "--claude and --codex are mutually exclusive; please pick one",
         "agent_not_detected": "No usage data for {flag}; use it in that agent first, then query again",
-        "available_cmds": "Available commands: status, daily, weekly, monthly, sessions, theme, setup, unsetup, --version",
+        "available_cmds": "Available commands: status, daily, weekly, monthly, sessions, theme, quota, setup, unsetup, --version",
         # --- status.py（会话表列名与 tips）---
         "recent_sessions": "Recent Sessions",
         "sessions_tips": "Tips: tt sessions <N> for count · --sort cost|tokens|time|messages · --asc/--desc to sort",
@@ -115,6 +121,12 @@ _STRINGS = {
         "theme_set_statusline": "Status line regenerated, restart session to take effect",
         "theme_env_override": "Note: env TT_THEME is set and overrides this change",
         "theme_usage": "Usage: tt theme [show | list | set <name> | preview <name>]",
+        # --- quota display (cli.py) ---
+        "quota_usage": "Usage: tt quota [show | used | remaining]",
+        "quota_current": "Current quota display: {mode}",
+        "quota_used": "used",
+        "quota_remaining": "remaining",
+        "quota_set_ok": "Quota display switched to {mode}",
         # --- wizard (wizard.py) ---
         "wizard_pick_theme": "Pick a theme",
         "wizard_theme_prompt": "Pick a theme",

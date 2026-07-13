@@ -5,6 +5,7 @@ import json, os, re, subprocess, sys, tempfile, unicodedata
 from datetime import datetime, timezone
 
 STATUS_FILE = os.path.join(os.path.expanduser("~/.config/token-tracker"), "tt-status.json")
+CONFIG_FILE = os.path.join(os.path.expanduser("~/.config/token-tracker"), "config.json")
 ANSI_RE = re.compile(r'\033\[[0-9;]*m')
 # 配色在 tt setup / update_hook 烘焙时由 themes.theme_to_statusline_ansi(当前主题) 注入：
 # THEME_COLORS 为当前主题 truecolor，THEME_COLORS_256 为同主题的 256 色近似（兜底不支持
@@ -58,20 +59,40 @@ def color_by_pct(pct):
     return C["bar_ok"] if pct < 50 else C["bar_warn"] if pct < 80 else C["bar_danger"]
 
 
+def quota_display_mode():
+    try:
+        with open(CONFIG_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+        return "remaining" if data.get("quota_display") == "remaining" else "used"
+    except Exception:
+        return "used"
+
+
+def quota_pct(used_pct, mode):
+    pct = max(0.0, min(100.0, float(used_pct)))
+    return 100.0 - pct if mode == "remaining" else pct
+
+
+def color_by_quota_pct(pct, mode):
+    if mode == "remaining":
+        return C["bar_danger"] if pct < 20 else C["bar_warn"] if pct < 50 else C["bar_ok"]
+    return color_by_pct(pct)
+
+
 def fmt_tokens(n):
     if n >= 1_000_000: return f"{n/1_000_000:.1f}M"
     if n >= 1_000: return f"{n/1_000:.0f}k"
     return str(n)
 
 
-def progress_bar(value, bar_width=8):
+def progress_bar(value, bar_width=8, mode="used"):
     filled_char, empty_char = "█", "░"
     if value is None:
         return empty_char * bar_width + " n/a"
-    pct = max(0.0, min(100.0, float(value)))
+    pct = quota_pct(value, mode)
     filled = round(pct / 100 * bar_width)
     empty = bar_width - filled
-    color = color_by_pct(pct)
+    color = color_by_quota_pct(pct, mode)
     # 未填充网格也染当前档位色（░ 字形天然更淡 → 同色暗格）；pct=0 时不动、保持灰
     empty_str = f"{color}{empty_char * empty}{C['reset']}" if pct > 0 and empty else empty_char * empty
     return f"{color}{filled_char * filled}{C['reset']}{empty_str} {C['label']}{pct:.0f}%{C['reset']}"
@@ -229,6 +250,7 @@ def render(data, now, tps=None):
     ctx = data.get("context_window") or {}
     cost = data.get("cost") or {}
     bar_w = 8 if W >= 100 else 6 if W >= 60 else 4
+    quota_mode = quota_display_mode()
 
     # --- Line 1: Project | Total | Cost | Code（项目名原色，消耗/产出指标统一青色）---
     line1 = []
@@ -289,9 +311,9 @@ def render(data, now, tps=None):
                 if remain > 0:
                     reset_str = f" \033[2m{C['label']}({fmt_duration(remain)}){C['reset']}"
             rl_parts.append((
-                f"{C['label']}{label}:{C['reset']}{progress_bar(pct, bar_w)}{reset_str}",
-                f"{C['label']}{label}:{C['reset']}{progress_bar(pct, bar_w)}",
-                f"{C['label']}{label}:{pct:.0f}%{C['reset']}",
+                f"{C['label']}{label}:{C['reset']}{progress_bar(pct, bar_w, quota_mode)}{reset_str}",
+                f"{C['label']}{label}:{C['reset']}{progress_bar(pct, bar_w, quota_mode)}",
+                f"{C['label']}{label}:{quota_pct(pct, quota_mode):.0f}%{C['reset']}",
             ))
     ctx_parts = []
     if ctx.get("used_percentage") is not None:
@@ -307,7 +329,8 @@ def render(data, now, tps=None):
             ctx_seg = (ctx_parts[:1] if idx < 2 else ctx_parts[1:2]) if ctx_parts else []
             segs = rl_seg + ctx_seg
             if rl_seg:
-                segs[0] = f"{C['label']}Limit:{C['reset']} {segs[0]}"
+                prefix = "Left:" if quota_mode == "remaining" else "Limit:"
+                segs[0] = f"{C['label']}{prefix}{C['reset']} {segs[0]}"
             if idx == 2 or vlen(" | ".join(segs)) <= W:
                 line2 = segs
                 break

@@ -55,6 +55,28 @@ def test_extract_agent_arg_conflict_exits(monkeypatch, capsys):
     assert e.value.code == 1
 
 
+def test_cmd_quota_set_writes_config_and_updates_hook(tmp_path, monkeypatch):
+    from token_tracker import config
+
+    calls: dict = {}
+    monkeypatch.setattr(config, "CONFIG_DIR", str(tmp_path))
+    monkeypatch.setattr(config, "CONFIG_PATH", str(tmp_path / "config.json"))
+    monkeypatch.setattr(config, "_LEGACY_THEME_PATH", str(tmp_path / "theme.json"))
+    monkeypatch.setattr(config, "_LEGACY_LANG_PATH", str(tmp_path / "lang.json"))
+    monkeypatch.setattr(cli, "is_setup", lambda: True)
+    monkeypatch.setattr(cli, "update_hook", lambda: calls.__setitem__("updated", True))
+
+    cli.cmd_quota(["remaining"])
+
+    assert config.quota_display_mode() == "remaining"
+    assert calls == {"updated": True}
+
+
+def test_cmd_quota_invalid_prints_usage(capsys):
+    cli.cmd_quota(["bogus"])
+    assert "quota" in capsys.readouterr().out
+
+
 def test_cli_agent_flag_filters_agents(monkeypatch):
     # `tt daily --codex` 显式指定 → agents 收窄到 codex，会话内自动识别不再生效
     from types import SimpleNamespace

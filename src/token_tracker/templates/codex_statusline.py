@@ -24,6 +24,27 @@ def _color(pct):
     return C["bar_ok"] if pct < 50 else C["bar_warn"] if pct < 80 else C["bar_danger"]
 
 
+def _quota_display_mode():
+    try:
+        path = os.path.join(os.path.expanduser("~/.config/token-tracker"), "config.json")
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        return "remaining" if data.get("quota_display") == "remaining" else "used"
+    except Exception:
+        return "used"
+
+
+def _quota_pct(used_pct, mode):
+    pct = max(0.0, min(100.0, float(used_pct)))
+    return 100.0 - pct if mode == "remaining" else pct
+
+
+def _quota_color(pct, mode):
+    if mode == "remaining":
+        return C["bar_danger"] if pct < 20 else C["bar_warn"] if pct < 50 else C["bar_ok"]
+    return _color(pct)
+
+
 def _fmt_duration(s):
     s = int(s)
     if s >= 86400:
@@ -41,12 +62,12 @@ def fmt_tokens(n):
     return str(n)
 
 
-def _bar(pct, width=8):
+def _bar(pct, width=8, mode="used"):
     """进度条（仿 CC statusline）：█ 填充档位色 + ░ 空槽（>0 也染档位色），尾接 % 档位色。"""
-    pct = max(0.0, min(100.0, float(pct)))
+    pct = _quota_pct(pct, mode)
     filled = round(pct / 100 * width)
     empty = width - filled
-    color = _color(pct)
+    color = _quota_color(pct, mode)
     empty_s = f"{color}{'░' * empty}{RST}" if pct > 0 and empty else "░" * empty
     return f"{color}{'█' * filled}{RST}{empty_s} {color}{pct:.0f}%{RST}"
 
@@ -169,8 +190,8 @@ def _render_project(cwd):
     return f"{BOLD}{C['project']}[{name}]{RST}({inner})"
 
 
-def _render_limit(label, pct, resets_at, now_ts):
-    s = f"{C['label']}{label} {RST}{_bar(pct)}"
+def _render_limit(label, pct, resets_at, now_ts, mode):
+    s = f"{C['label']}{label} {RST}{_bar(pct, mode=mode)}"
     if resets_at:
         remain = int(resets_at) - now_ts
         if remain > 0:
@@ -195,6 +216,7 @@ def main():
     cwd = payload.get("cwd") or cwd
     ctx = _ctx_pct(info) if info else None
     now_ts = int(datetime.now(timezone.utc).timestamp())
+    quota_mode = _quota_display_mode()
 
     # L1: 项目(git) | Total | Model
     line1 = []
@@ -213,15 +235,16 @@ def main():
     # L2: Limit: 5h | 7d | <window> Ctx（仿 CC statusline，带进度条 + reset）
     line2 = []
     if rl and rl.five_hour_pct is not None:
-        line2.append(_render_limit("5h", rl.five_hour_pct, rl.five_hour_resets_at, now_ts))
+        line2.append(_render_limit("5h", rl.five_hour_pct, rl.five_hour_resets_at, now_ts, quota_mode))
     if rl and rl.seven_day_pct is not None:
-        line2.append(_render_limit("7d", rl.seven_day_pct, rl.seven_day_resets_at, now_ts))
+        line2.append(_render_limit("7d", rl.seven_day_pct, rl.seven_day_resets_at, now_ts, quota_mode))
     if ctx is not None:
         size = (info or {}).get("model_context_window") or 0
         prefix = f"{fmt_tokens(size)} " if size else ""
         line2.append(f"{C['label']}{prefix}Ctx {RST}{_bar(ctx)}")
     if line2:
-        line2[0] = f"{C['label']}Limit:{RST} " + line2[0]
+        prefix = "Left:" if quota_mode == "remaining" else "Limit:"
+        line2[0] = f"{C['label']}{prefix}{RST} " + line2[0]
 
     lines = [" | ".join(x) for x in (line1, line2) if x]
     if lines:

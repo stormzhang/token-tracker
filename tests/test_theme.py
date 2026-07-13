@@ -110,6 +110,18 @@ def test_save_load_roundtrip(tmp_path, monkeypatch):
     assert config.load_config()["theme"] == "nord"
 
 
+def test_quota_display_roundtrip_and_fallback(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "CONFIG_DIR", str(tmp_path / "cfg"))
+    monkeypatch.setattr(config, "CONFIG_PATH", str(tmp_path / "cfg" / "config.json"))
+    monkeypatch.setattr(config, "_LEGACY_THEME_PATH", str(tmp_path / "cfg" / "theme.json"))
+    monkeypatch.setattr(config, "_LEGACY_LANG_PATH", str(tmp_path / "cfg" / "lang.json"))
+    assert config.quota_display_mode() == "used"
+    config.save_quota_display("remaining")
+    assert config.quota_display_mode() == "remaining"
+    config._save_field("quota_display", "bad")
+    assert config.quota_display_mode() == "used"
+
+
 def test_s_proxy_follows_active_theme(monkeypatch):
     monkeypatch.setattr(theme, "_ACTIVE_NAME", None)
     theme.set_active_theme("mocha")
@@ -280,5 +292,6 @@ def test_run_wizard_saves_theme(tmp_path, monkeypatch):
     monkeypatch.setattr(theme, "_ACTIVE_NAME", None)
     wizard.run_wizard()
     assert config.load_config()["theme"] == "nord"
+    assert "quota_display" not in config.load_config()
     assert config.load_config()["lang"] == "zh"  # 语言也被保存
     assert i18n.LANG == "zh"  # i18n 即时切换

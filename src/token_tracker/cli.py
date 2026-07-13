@@ -385,6 +385,32 @@ def cmd_theme(args: list[str]) -> None:
         get_console().print(f"[dim]{t('theme_usage')}[/dim]")
 
 
+def _quota_mode_label(mode: str) -> str:
+    return t("quota_remaining") if mode == config.QUOTA_DISPLAY_REMAINING else t("quota_used")
+
+
+def _quota_show() -> None:
+    get_console().print(t("quota_current", mode=_quota_mode_label(config.quota_display_mode())))
+
+
+def _quota_set(mode: str) -> None:
+    config.save_quota_display(mode)
+    get_console().print(t("quota_set_ok", mode=_quota_mode_label(mode)))
+    if is_setup():
+        update_hook()
+        get_console().print(f"[dim]{t('theme_set_statusline')}[/dim]")
+
+
+def cmd_quota(args: list[str]) -> None:
+    sub = args[0] if args else "show"
+    if sub == "show":
+        _quota_show()
+    elif sub in config.QUOTA_DISPLAY_MODES:
+        _quota_set(sub)
+    else:
+        get_console().print(f"[dim]{t('quota_usage')}[/dim]")
+
+
 def main():
     # --mock：本地开发演示，加载 mock/ 假数据再走正常报表流程（mock/ 在 .gitignore）
     if "--mock" in sys.argv:
@@ -412,6 +438,9 @@ def main():
 
     if command == "theme":
         cmd_theme(args[1:])
+        return
+    if command == "quota":
+        cmd_quota(args[1:])
         return
 
     # 已配置过的情况下，任意命令都顺带同步状态栏脚本（setup/unsetup 自行处理）

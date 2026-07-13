@@ -116,6 +116,7 @@ tt weekly         # 周报
 tt monthly        # 月报
 tt sessions       # 最近 20 条会话明细（tt sessions <n> 改条数、--sort 改排序）
 tt theme          # 查看 / 切换配色主题（show / list / set / preview）
+tt quota          # 查看 / 切换 5h/7d 额度展示口径（used / remaining）
 tt unsetup        # 卸载并恢复安装前的配置
 tt --version      # 查看版本（-v / -V 同义）
 ```
@@ -146,6 +147,18 @@ tt monthly --theme nord  # 任意报表临时换主题渲染（不持久化、�
 
 - 切换持久化到 `~/.config/token-tracker/config.json`；优先级 `--theme` 参数 > `TT_THEME` 环境变量 > 配置文件 > 自动。
 - 终端支持 truecolor 用精确配色；不支持的（如 macOS 自带 Terminal.app）自动降级到 **256 色近似**。
+
+## 额度展示口径
+
+默认 5h / 7d 额度按**已使用量**展示，与历史版本兼容；如果你更习惯和应用内一致的**剩余量**口径，可以切换：
+
+```bash
+tt quota show       # 查看当前口径
+tt quota remaining  # 按剩余量展示
+tt quota used       # 恢复按已使用量展示
+```
+
+配置持久化到 `~/.config/token-tracker/config.json`。`tt status` 立即生效；Claude Code / Codex 状态栏脚本会自动重新生成，重启会话后生效。
 
 ## 高级
 

@@ -210,7 +210,10 @@ def _print_summary(console, choice: str, components: SetupComponents) -> None:
     green, pink, dim = base["green"], base["pink"], base["overlay0"]
     lang_name = "中文" if i18n.LANG == "zh" else "English"  # 语言名本身不翻译
 
-    rows = [(t("wizard_summary_lang"), lang_name), (t("wizard_summary_theme"), choice)]
+    rows = [
+        (t("wizard_summary_lang"), lang_name),
+        (t("wizard_summary_theme"), choice),
+    ]
     if _has_cc():
         # 双因素（意图 AND 文件实装）；_setup_claude 已写入意图，此处直接查 active
         state = f"[{green}]✓[/{green}]" if cc_statusline_active() else f"[{dim}]✗[/{dim}]"

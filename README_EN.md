@@ -116,6 +116,7 @@ tt weekly         # weekly report
 tt monthly        # monthly report
 tt sessions       # last 20 session details (tt sessions <n> to change count, --sort to change order)
 tt theme          # view / switch color theme (show / list / set / preview)
+tt quota          # view / switch 5h/7d quota display (used / remaining)
 tt unsetup        # uninstall and restore previous config
 tt --version      # show version (-v / -V)
 ```
@@ -146,6 +147,18 @@ tt monthly --theme nord  # render any report in a theme temporarily (no persist,
 
 - Choice persists to `~/.config/token-tracker/config.json`; priority: `--theme` flag > `TT_THEME` env var > config file > auto.
 - Truecolor terminals get exact colors; terminals without truecolor (e.g. macOS Terminal.app) fall back to a **256-color approximation**.
+
+## Quota Display
+
+By default, 5h / 7d quotas show **used** percentage for backwards compatibility. If you prefer the app-style **remaining** percentage, switch it with:
+
+```bash
+tt quota show       # show current mode
+tt quota remaining  # show remaining quota
+tt quota used       # show used quota
+```
+
+The setting is saved in `~/.config/token-tracker/config.json`. `tt status` applies it immediately; Claude Code / Codex statusline scripts are regenerated automatically and take effect after restarting the session.
 
 ## Advanced
 

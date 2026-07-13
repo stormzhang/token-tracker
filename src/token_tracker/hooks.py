@@ -38,8 +38,8 @@ CODEX_DIR = _CODEX
 CODEX_CONFIG = os.path.join(CODEX_DIR, "config.toml")     # 改 Codex 配置，留 agent 目录
 CODEX_STATUSLINE_HOOK_PATH = os.path.join(_TT, "codex-statusline.py")
 STATUS_FILE = config.STATUS_FILE                          # CC statusline 缓存（单一权威定义在 config）
-HOOK_VERSION = "1.9"
-STATUSLINE_HOOK_VERSION = "1.1"
+HOOK_VERSION = "2.0"
+STATUSLINE_HOOK_VERSION = "1.2"
 
 CC_BACKUP_PATH = os.path.join(_TT, "cc-backup.json")
 CODEX_BACKUP_LEGACY = os.path.join(_TT, "codex-backup.json")  # 老用户残留，unsetup 时还能恢复
