@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """token-tracker Kimi Code statusline（tui.toml [status_line].command）：渲染一行会话状态。
-[项目](分支* +A -D ?U) | Total: <会话累计 token> | Cost: $<累计成本> | 5h X% | 7d Y% | Model: <模型>/<effort>/<权限模式>
+[项目](分支* +A -D ?U) | Total: <会话累计 token> | Cost: $<累计成本> | 5h:<bar> X% (3h55m) | 7d:<bar> Y% (4d21h) | Model: <模型>/<effort>/<权限模式>
 （字段、顺序、配色与 CC statusline 同风格；Kimi 只取 stdout 首行（二进制 runStatusLineCommand 硬编码截断），故压成一行。
 5h/7d 限额走云端 GET <provider.base_url>/usages（OAuth access_token，同 CLI /usage 端点）：
 渲染只读本地配额缓存、零网络；缓存超 120s 派生 detached 子进程后台刷新，token 过期/失败就整段不显示）
@@ -290,6 +290,26 @@ def _pct_color(pct):
     return C["bar_ok"] if pct < 50 else C["bar_warn"] if pct < 80 else C["bar_danger"]
 
 
+def _fmt_duration(s):
+    """reset 倒计时紧凑格式（同 CC/Codex statusline）：4d21h / 3h55m / 45m。"""
+    s = int(s)
+    if s >= 86400:
+        return f"{s // 86400}d{s % 86400 // 3600}h"
+    if s >= 3600:
+        return f"{s // 3600}h{s % 3600 // 60}m"
+    return f"{s // 60}m"
+
+
+def _bar(pct, width=8):
+    """进度条（仿 CC/Codex statusline）：█ 填充档位色 + ░ 空槽（>0 也染档位色），尾接 % 档位色。"""
+    pct = max(0.0, min(100.0, float(pct)))
+    filled = round(pct / 100 * width)
+    empty = width - filled
+    color = _pct_color(pct)
+    empty_s = f"{color}{'░' * empty}{RST}" if pct > 0 and empty else "░" * empty
+    return f"{color}{'█' * filled}{RST}{empty_s} {color}{pct:.0f}%{RST}"
+
+
 def _quota_url():
     """/usages 端点（同 CLI /usage）：TT_KIMI_QUOTA_URL 覆盖 > config.toml managed provider
     base_url > 官方默认。"""
@@ -350,13 +370,30 @@ def _fetch_quota():
             return None
         return used / limit * 100 if limit > 0 else None
 
-    five = None
+    def _reset_ts(detail):
+        """detail.resetTime（ISO-8601 UTC，如 2026-08-23T13:32:55.338584Z）→ epoch 秒；解析失败 None。"""
+        if not isinstance(detail, dict):
+            return None
+        rt = detail.get("resetTime")
+        if not isinstance(rt, str) or not rt:
+            return None
+        try:
+            from datetime import datetime
+            return int(datetime.fromisoformat(rt.replace("Z", "+00:00")).timestamp())
+        except ValueError:
+            return None
+
+    five = five_reset = None
     for entry in data.get("limits") or []:
         win = (entry or {}).get("window") or {}
         if win.get("duration") == 300 and win.get("timeUnit") == "TIME_UNIT_MINUTE":
-            five = _pct((entry or {}).get("detail"))
+            detail = (entry or {}).get("detail")
+            five = _pct(detail)
+            five_reset = _reset_ts(detail)
             break
-    cache = {"fetched_at": int(time.time()), "five_hour": five, "seven_day": _pct(data.get("usage"))}
+    usage = data.get("usage")
+    cache = {"fetched_at": int(time.time()), "five_hour": five, "five_hour_reset": five_reset,
+             "seven_day": _pct(usage), "seven_day_reset": _reset_ts(usage)}
     tmp = None
     try:
         parent = os.path.dirname(QUOTA_CACHE_FILE)
@@ -409,7 +446,8 @@ def _maybe_refresh_quota():
 
 
 def _render_quota():
-    """读配额缓存渲染 ['5h X%', '7d Y%']；缓存缺失/超 QUOTA_DISPLAY_MAX_AGE → 不显示。"""
+    """读配额缓存渲染 ['5h:<bar> (3h55m)', '7d:<bar> (4d21h)']（仿 CC/Codex 进度条样式，无 Limit: 前缀）；
+    缓存缺失/超 QUOTA_DISPLAY_MAX_AGE → 不显示。reset 字段为后加，旧缓存没有就不显示括号倒计时。"""
     try:
         if time.time() - os.path.getmtime(QUOTA_CACHE_FILE) > QUOTA_DISPLAY_MAX_AGE:
             return []
@@ -418,10 +456,16 @@ def _render_quota():
     except Exception:
         return []
     segs = []
+    now = time.time()
     for key, label in (("five_hour", "5h"), ("seven_day", "7d")):
         pct = cache.get(key) if isinstance(cache, dict) else None
-        if isinstance(pct, (int, float)):
-            segs.append(f"{C['label']}{label}:{RST} {_pct_color(pct)}{pct:.0f}%{RST}")
+        if not isinstance(pct, (int, float)):
+            continue
+        seg = f"{C['label']}{label}:{RST}{_bar(pct)}"
+        reset = cache.get(key + "_reset")
+        if isinstance(reset, (int, float)) and reset > now:
+            seg += f" \033[2m{C['label']}({_fmt_duration(reset - now)}){RST}"
+        segs.append(seg)
     return segs
 
 

@@ -1365,12 +1365,18 @@ def test_kimi_statusline_quota_refresh_and_render(tmp_path):
         assert r.returncode == 0 and not r.stdout
         cache = json.loads(cache_file.read_text())
         assert round(cache["five_hour"]) == 18 and round(cache["seven_day"]) == 15
+        # resetTime 一并入缓存（epoch 秒），供渲染 reset 倒计时
+        assert isinstance(cache["five_hour_reset"], int) and isinstance(cache["seven_day_reset"], int)
 
         # 渲染只读缓存：5h/7d 段出现（阈值色）
         r1 = _run_kimi_statusline(script, payload, home, kimi_dir, **env)
         line1 = r1.stdout.splitlines()[0]
         assert "Limit" not in line1                      # 1.7 起不带 Limit: 前缀
         assert "5h:" in line1 and "18%" in line1
+        assert "█" in line1 and "░" in line1             # 进度条（仿 CC/Codex）
+        # 假服务的 resetTime 均在过去 → 不带倒计时括号（括号只在 reset 未来时出现；
+        # 本 payload 无 cwd/gitBranch，整行其它段也不含括号）
+        assert "(" not in line1
         assert "7d:" in line1 and "15%" in line1
 
         # 缓存超 15 分钟 → 5h/7d 段消失（本帧仍是旧渲染，后台刷新异步）
