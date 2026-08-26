@@ -77,6 +77,86 @@ def progress_bar(value, bar_width=8):
     return f"{color}{filled_char * filled}{C['reset']}{empty_str} {C['label']}{pct:.0f}%{C['reset']}"
 
 
+def is_glm_model(model_data):
+    """检测是否为智谱 GLM 模型"""
+    model_id = (model_data or {}).get("id") or ""
+    display_name = (model_data or {}).get("display_name") or ""
+    return "glm" in model_id.lower() or "glm" in display_name.lower()
+
+
+def fetch_zhipu_quota(api_key):
+    """调用智谱额度 API"""
+    try:
+        import urllib.request
+        import urllib.error
+
+        url = "https://open.bigmodel.cn/api/monitor/usage/quota/limit"
+        req = urllib.request.Request(url)
+        req.add_header("Authorization", api_key)
+        req.add_header("Content-Type", "application/json")
+
+        with urllib.request.urlopen(req, timeout=5) as response:
+            data = json.loads(response.read().decode())
+
+        if not data.get("success"):
+            return None
+
+        limits = data.get("data", {}).get("limits", [])
+        five_hour = seven_day = None
+
+        for limit in limits:
+            if limit.get("type") != "TOKENS_LIMIT":
+                continue
+
+            # 智谱 API 的 unit 字段含义：
+            # - unit=3 → 5 小时滚动窗口
+            # - unit=6 → 每周窗口
+            # number 字段不影响窗口类型判断
+            unit = limit.get("unit")
+            pct = limit.get("percentage")
+            reset_ms = limit.get("nextResetTime")
+
+            # unit=3 → 5小时窗口
+            if unit == 3:
+                five_hour = {"used_percentage": pct, "resets_at": reset_ms}
+            # unit=6 → 每周窗口
+            elif unit == 6:
+                seven_day = {"used_percentage": pct, "resets_at": reset_ms}
+
+        return {"five_hour": five_hour, "seven_day": seven_day}
+
+    except (urllib.error.URLError, json.JSONDecodeError, KeyError):
+        return None
+
+
+def get_zhipu_quota_cached(api_key, now_ts):
+    """带缓存的智谱额度查询（缓存 5 分钟）"""
+    cache_file = os.path.join(os.path.dirname(STATUS_FILE), "zhipu-quota.json")
+
+    try:
+        if os.path.exists(cache_file):
+            with open(cache_file, encoding="utf-8") as f:
+                cached = json.load(f)
+                cached_at = cached.get("_cached_at", 0)
+                # 缓存有效期 5 分钟（300秒）
+                if now_ts - cached_at < 300:
+                    return cached.get("data")
+    except Exception:
+        pass
+
+    # 缓存过期或不存在，重新查询
+    data = fetch_zhipu_quota(api_key)
+    if data:
+        try:
+            os.makedirs(os.path.dirname(cache_file), exist_ok=True)
+            with open(cache_file, "w", encoding="utf-8") as f:
+                json.dump({"_cached_at": now_ts, "data": data}, f)
+        except Exception:
+            pass
+
+    return data
+
+
 def fmt_duration(seconds):
     if seconds >= 86400:
         d, rem = int(seconds // 86400), int(seconds % 86400)
@@ -232,6 +312,20 @@ def render(data, now, tps=None):
     ctx = data.get("context_window") or {}
     cost = data.get("cost") or {}
     bar_w = 8 if W >= 100 else 6 if W >= 60 else 4
+
+    # --- 智谱额度补充（优先于 CC 官方数据）---
+    model_data = data.get("model") or {}
+    if is_glm_model(model_data):
+        api_key = os.environ.get("ANTHROPIC_AUTH_TOKEN") or os.environ.get("ZHIPU_API_KEY")
+        if api_key:
+            zhipu_quota = get_zhipu_quota_cached(api_key, now.timestamp())
+            if zhipu_quota:
+                # 注入到 rate_limits，供后续显示逻辑使用
+                data.setdefault("rate_limits", {})
+                if zhipu_quota.get("five_hour"):
+                    data["rate_limits"]["five_hour"] = zhipu_quota["five_hour"]
+                if zhipu_quota.get("seven_day"):
+                    data["rate_limits"]["seven_day"] = zhipu_quota["seven_day"]
 
     # --- Line 1: Project | Total | Cost | Code（项目名原色，消耗/产出指标统一青色）---
     line1 = []
