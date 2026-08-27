@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import stat
 import sys
 import tomllib
@@ -41,6 +42,14 @@ def build_module_command(python: str, action: str) -> str:
     """生成 Skill / Hook 共用的绝对解释器命令；不依赖 GUI Codex 的 PATH。"""
     if os.name == "nt":
         python = python.replace("\\", "/")
+    else:
+        home = os.path.realpath(os.path.expanduser("~"))
+        executable = os.path.abspath(python)
+        if os.path.commonpath((home, executable)) == home:
+            relative = os.path.relpath(executable, home)
+            if all(char.isalnum() or char in "._-/" for char in relative):
+                return f'"$HOME/{relative}" -B -m token_tracker.sidebar_command {action}'
+            return f'"$HOME"/{shlex.quote(relative)} -B -m token_tracker.sidebar_command {action}'
     return f'"{python}" -B -m token_tracker.sidebar_command {action}'
 
 
@@ -171,6 +180,58 @@ def _prompt_hook_handler() -> dict:
         ),
         "timeout": 2,
     }
+
+
+def _resolve_prompt_hook_executable(value: str) -> str | None:
+    """仅解析 Hook 支持的解释器路径写法，拒绝其它 shell 语义。"""
+    if os.name == "nt":
+        return os.path.realpath(value) if os.path.isabs(value) else None
+    home = os.path.realpath(os.path.expanduser("~"))
+    if value.startswith("$HOME/"):
+        value = os.path.join(home, value.removeprefix("$HOME/"))
+    elif value.startswith("${HOME}/"):
+        value = os.path.join(home, value.removeprefix("${HOME}/"))
+    elif value.startswith("~/"):
+        value = os.path.join(home, value.removeprefix("~/"))
+    elif not os.path.isabs(value):
+        return None
+    return os.path.realpath(value)
+
+
+def _prompt_hook_command_matches(command: str) -> bool:
+    """只把同一解释器的纯 prompt-hook 命令视为等价。"""
+    try:
+        argv = shlex.split(command, posix=True)
+    except ValueError:
+        return False
+    expected = [
+        sys.executable or "python3",
+        "-B",
+        "-m",
+        "token_tracker.sidebar_command",
+        "prompt-hook",
+        "--agent",
+        "codex",
+    ]
+    actual_executable = _resolve_prompt_hook_executable(argv[0]) if argv else None
+    expected_executable = _resolve_prompt_hook_executable(expected[0])
+    return (
+        argv[1:] == expected[1:]
+        and actual_executable is not None
+        and actual_executable == expected_executable
+    )
+
+
+def _prompt_hook_handler_matches(handler: object) -> bool:
+    expected = _prompt_hook_handler()
+    return (
+        isinstance(handler, dict)
+        and set(handler) == set(expected)
+        and handler.get("type") == expected["type"]
+        and handler.get("timeout") == expected["timeout"]
+        and isinstance(handler.get("command"), str)
+        and _prompt_hook_command_matches(handler["command"])
+    )
 
 
 def _statusline_hook_handler(command: str) -> dict:
@@ -316,11 +377,28 @@ def _with_managed_hooks(data: dict, statusline_command: str | None) -> dict:
     return result
 
 
+def _managed_hooks_equivalent(current: object, expected: object) -> bool:
+    """仅放宽 Token Tracker 自己的 Codex prompt-hook 解释器路径表示。"""
+    if expected == _prompt_hook_handler():
+        return _prompt_hook_handler_matches(current)
+    if type(current) is not type(expected):
+        return False
+    if isinstance(expected, dict):
+        return set(current) == set(expected) and all(
+            _managed_hooks_equivalent(current[key], value) for key, value in expected.items()
+        )
+    if isinstance(expected, list):
+        return len(current) == len(expected) and all(
+            _managed_hooks_equivalent(left, right) for left, right in zip(current, expected, strict=True)
+        )
+    return current == expected
+
+
 def managed_hooks_need_sync(statusline_command: str | None) -> bool:
     """两个 Token Tracker Hook 是否需要统一同步到用户级 hooks.json。"""
     try:
         data = _read_hooks()
-        return data != _with_managed_hooks(data, statusline_command)
+        return not _managed_hooks_equivalent(data, _with_managed_hooks(data, statusline_command))
     except ValueError:
         return False  # 损坏配置只在显式 setup 时提示，自动更新绝不覆盖
 

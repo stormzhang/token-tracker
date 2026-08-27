@@ -84,6 +84,69 @@ def test_hook_merge_idempotent_and_uninstall_preserves_user(tmp_path, monkeypatc
     }
 
 
+@pytest.mark.parametrize(
+    "command_template",
+    [
+        '"{executable}" -B -m token_tracker.sidebar_command prompt-hook --agent codex',
+        '"$HOME/.local/bin/python" -B -m token_tracker.sidebar_command prompt-hook --agent codex',
+        '"${{HOME}}/.local/bin/python" -B -m token_tracker.sidebar_command prompt-hook --agent codex',
+        '"~/.local/bin/python" -B -m token_tracker.sidebar_command prompt-hook --agent codex',
+    ],
+)
+def test_managed_hooks_treats_home_and_absolute_python_as_equivalent(tmp_path, monkeypatch, command_template):
+    home = tmp_path / "home"
+    executable = home / ".local" / "bin" / "python"
+    path = tmp_path / "hooks.json"
+    path.write_text(json.dumps({"hooks": {"UserPromptSubmit": [{"hooks": [{
+        "type": "command",
+        "command": command_template.format(executable=executable),
+        "timeout": 2,
+    }]}]}}), encoding="utf-8")
+    monkeypatch.setattr(sidebar_install, "CODEX_HOOKS", str(path))
+    monkeypatch.setattr(sidebar_install.sys, "executable", str(executable))
+    monkeypatch.setattr(sidebar_install.os.path, "expanduser", lambda value: str(home) if value == "~" else value)
+
+    assert sidebar_install._prompt_hook_handler()["command"].startswith('"$HOME/.local/bin/python"')
+    assert not sidebar_install.managed_hooks_need_sync(None)
+
+
+def test_portable_prompt_hook_install_is_idempotent(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    executable = home / ".venv" / "bin" / "python"
+    path = tmp_path / "hooks.json"
+    monkeypatch.setattr(sidebar_install, "CODEX_HOOKS", str(path))
+    monkeypatch.setattr(sidebar_install.sys, "executable", str(executable))
+    monkeypatch.setattr(sidebar_install.os.path, "expanduser", lambda value: str(home) if value == "~" else value)
+
+    assert sidebar_install.install_managed_hooks(None)
+    command = json.loads(path.read_text(encoding="utf-8"))["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"]
+    assert command.startswith('"$HOME/.venv/bin/python"')
+    assert not sidebar_install.install_managed_hooks(None)
+    assert not sidebar_install.managed_hooks_need_sync(None)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        '"/other/python" -B -m token_tracker.sidebar_command prompt-hook --agent codex',
+        '"$HOME/.venv/bin/python" -B -m token_tracker.sidebar_command prompt-hook --agent other',
+        '"$HOME/.venv/bin/python" -B -m token_tracker.sidebar_command prompt-hook --agent codex; echo stale',
+    ],
+)
+def test_managed_hooks_rejects_different_python_or_prompt_hook_semantics(tmp_path, monkeypatch, command):
+    home = tmp_path / "home"
+    executable = home / ".venv" / "bin" / "python"
+    path = tmp_path / "hooks.json"
+    path.write_text(json.dumps({"hooks": {"UserPromptSubmit": [{"hooks": [{
+        "type": "command", "command": command, "timeout": 2,
+    }]}]}}), encoding="utf-8")
+    monkeypatch.setattr(sidebar_install, "CODEX_HOOKS", str(path))
+    monkeypatch.setattr(sidebar_install.sys, "executable", str(executable))
+    monkeypatch.setattr(sidebar_install.os.path, "expanduser", lambda value: str(home) if value == "~" else value)
+
+    assert sidebar_install.managed_hooks_need_sync(None)
+
+
 def test_managed_hooks_merge_both_events_and_uninstall_preserves_user(tmp_path, monkeypatch):
     path = tmp_path / ".codex" / "hooks.json"
     path.parent.mkdir()
