@@ -6,7 +6,7 @@ from datetime import datetime
 from rich.text import Text
 
 from . import config, i18n
-from .adapters import claude, codex, kimi
+from .adapters import claude, codex, kimi, pi
 from .adapters.rate_limits import load_rate_limits as load_claude_rate_limits
 from .adapters.registry import detect_agents
 from .adapters.types import StatusSummary
@@ -32,7 +32,7 @@ from .ui.tables import (
     render_weekly,
 )
 
-AGENT_LOADERS = {"claude-code": claude, "codex": codex, "kimi": kimi}
+AGENT_LOADERS = {"claude-code": claude, "codex": codex, "kimi": kimi, "pi": pi}
 
 
 def _load_codex_rate_limits():
@@ -44,7 +44,7 @@ def _load_codex_rate_limits():
 RATE_LIMIT_LOADERS = {"claude-code": load_claude_rate_limits, "codex": _load_codex_rate_limits}
 
 # agent 过滤 flag → agent_id（issue #19；_extract_agent_arg 解析、_select_agents 反查共用）
-_FLAG_TO_ID = {"--claude": "claude-code", "--codex": "codex", "--kimi": "kimi"}
+_FLAG_TO_ID = {"--claude": "claude-code", "--codex": "codex", "--kimi": "kimi", "--pi": "pi"}
 
 # 排序字段 → stats 属性名（单一权威表）。
 # "time" 的属性因命令而异（daily=date / weekly=week / sessions=start_time），不在此表，走 default_attr。
@@ -84,7 +84,7 @@ def _parse_limit(args: list[str], default: int) -> int:
 
 
 def _extract_agent_arg(args: list[str]) -> tuple[list[str], str | None]:
-    """提取 `--claude` / `--codex` / `--kimi`，返回 (剩余 args, agent_id | None)。互斥（同时给报错退出）；
+    """提取 `--claude` / `--codex` / `--kimi` / `--pi`，返回 (剩余 args, agent_id | None)。互斥（同时给报错退出）；
     未给返回 None（走默认合并 + 会话自动识别）。用于多 agent 环境按需只看一个 agent（issue #19）。"""
     remaining: list[str] = []
     agent_id: str | None = None
@@ -236,7 +236,7 @@ def _cmd_sidebar(agents, args: list[str]) -> None:
     （备用屏 + 滚动 + 5s 定时刷新，q / Ctrl+C 退出）；`--once` 或非 tty 打一帧
     Rich 快照即退（脚本 / `!tt sidebar` / 测试用）。只读 transcript 与心跳文件，
     不写任何产物；不跟随会话收窄 agent——侧边栏本职是「总览所有会话」，
-    显式 --claude / --codex / --kimi 才过滤。"""
+    显式 --claude / --codex / --kimi / --pi 才过滤。"""
     agent_ids = {a.id for a in agents}
     if "--once" in args or not sys.stdout.isatty():
         sessions = scan_sessions(agent_ids=agent_ids)
@@ -257,6 +257,8 @@ def _current_session_agent() -> str | None:
         return "codex"
     if os.environ.get("CLAUDECODE"):
         return "claude-code"
+    if os.environ.get("PI_CODING_AGENT"):  # pi 进程标记（child processes 继承，同 CLAUDECODE 语义）
+        return "pi"
     if kimi.current_session_id_for_cwd(fresh_within_s=30 * 60):
         return "kimi"
     return None
@@ -291,6 +293,7 @@ def _in_agent_session_env() -> bool:
         os.environ.get("CODEX_THREAD_ID")
         or os.environ.get("CODEX_SANDBOX")
         or os.environ.get("CLAUDECODE")
+        or os.environ.get("PI_CODING_AGENT")
     )
 
 

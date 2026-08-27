@@ -39,6 +39,16 @@ def _isolate_real_home(tmp_path, monkeypatch):
     monkeypatch.setattr(hooks, "KIMI_STATUSLINE_HOOK_PATH", str(tt / "kimi-statusline.py"))
     monkeypatch.setattr(hooks, "KIMI_STATUSLINE_STATE_PATH", str(tt / "tt-kimi-statusline.json"))
     monkeypatch.setattr(hooks, "KIMI_STATUSLINE_QUOTA_PATH", str(tt / "tt-kimi-quota.json"))
+    monkeypatch.setattr(hooks, "_PI", str(home / ".pi" / "agent"))
+    monkeypatch.setattr(hooks, "PI_STATUSLINE_HOOK_PATH", str(tt / "pi-statusline.py"))
+    monkeypatch.setattr(hooks, "PI_STATUSLINE_STATE_PATH", str(tt / "tt-pi-statusline.json"))
+    monkeypatch.setattr(
+        sidebar_install, "PI_EXTENSION_DIR", str(home / ".pi" / "agent" / "extensions")
+    )
+    monkeypatch.setattr(
+        sidebar_install, "PI_EXTENSION_PATH",
+        str(home / ".pi" / "agent" / "extensions" / "tt-statusline.ts"),
+    )
     monkeypatch.setattr(sidebar_install, "KIMI_TUI", str(home / ".kimi-code" / "tui.toml"))
     monkeypatch.setattr(sidebar_install, "CODEX_HOOKS", str(home / ".codex" / "hooks.json"))
     monkeypatch.setattr(
@@ -1094,6 +1104,7 @@ def test_ask_components_asks_cc_then_codex(monkeypatch):
     monkeypatch.setattr(wizard, "_has_cc", lambda: True)
     monkeypatch.setattr(wizard, "_has_codex", lambda: True)
     monkeypatch.setattr(wizard, "_has_kimi", lambda: False)  # 本机装有 Kimi，固定关掉、问题数稳定
+    monkeypatch.setattr(wizard, "_has_pi", lambda: False)  # 本机装有 Pi，固定关掉、问题数稳定
     monkeypatch.setattr(wizard, "recommended_components",
                         lambda: hooks.SetupComponents(cc_statusline=False, codex_faux_statusline=True))
 
@@ -1115,6 +1126,7 @@ def test_ask_components_cc_only(monkeypatch):
     monkeypatch.setattr(wizard, "_has_cc", lambda: True)
     monkeypatch.setattr(wizard, "_has_codex", lambda: False)
     monkeypatch.setattr(wizard, "_has_kimi", lambda: False)  # 本机装有 Kimi，固定关掉、问题数稳定
+    monkeypatch.setattr(wizard, "_has_pi", lambda: False)  # 本机装有 Pi，固定关掉、问题数稳定
     monkeypatch.setattr(wizard, "recommended_components", lambda: hooks.SetupComponents())
     monkeypatch.setattr(wizard, "_ask_yes_no", lambda message, default: calls.append(message) or True)
     c = wizard.ask_components()
@@ -1592,6 +1604,7 @@ def test_ask_components_kimi_question(monkeypatch):
     monkeypatch.setattr(wizard, "_has_cc", lambda: False)
     monkeypatch.setattr(wizard, "_has_codex", lambda: False)
     monkeypatch.setattr(wizard, "_has_kimi", lambda: True)
+    monkeypatch.setattr(wizard, "_has_pi", lambda: False)  # 本机装有 Pi，固定关掉、问题数稳定
     monkeypatch.setattr(wizard, "recommended_components",
                         lambda: hooks.SetupComponents(kimi_statusline=False))
     monkeypatch.setattr(wizard, "_ask_yes_no",
@@ -1601,3 +1614,148 @@ def test_ask_components_kimi_question(monkeypatch):
     assert asked[0][0].startswith("[1] ")
     assert c.kimi_statusline is False
     assert c.cc_statusline is True and c.codex_faux_statusline is True
+
+
+# --- Pi statusline（extensions/tt-statusline.ts 扩展 + pi-statusline.py 脚本） ---
+
+
+def test_pi_statusline_render_injects_version_and_theme():
+    # 版本号 + 主题配色注入、占位符不残留、语法正确（脚本零依赖，无 __TT_PYTHON__ 需求）。
+    rendered = hooks._render_pi_statusline_hook()
+    assert f'__version__ = "{hooks.PI_STATUSLINE_HOOK_VERSION}"' in rendered
+    assert "__PI_STATUSLINE_HOOK_VERSION__" not in rendered
+    assert "__STATUSLINE_TRUECOLOR__" not in rendered
+    assert 'sys.platform == "win32"' in rendered  # Windows stdout UTF-8 防护（同 Kimi statusline）
+    compile(rendered, "<pi-statusline>", "exec")
+
+
+def test_pi_statusline_version_roundtrip(tmp_path, monkeypatch):
+    # _installed_pi_statusline_version 读回的版本应与写入的 PI_STATUSLINE_HOOK_VERSION 一致。
+    script = tmp_path / "pi-statusline.py"
+    monkeypatch.setattr(hooks, "PI_STATUSLINE_HOOK_PATH", str(script))
+    assert hooks._installed_pi_statusline_version() is None  # 未装
+    hooks._write_pi_statusline_script()
+    assert hooks._installed_pi_statusline_version() == hooks.PI_STATUSLINE_HOOK_VERSION
+
+
+def test_setup_and_unsetup_pi_statusline(tmp_path):
+    # autouse fixture 已把 hooks._PI / sidebar_install.PI_EXTENSION_* 指到 tmp；造出 pi home 即可。
+    pi_dir = tmp_path / "_home" / ".pi" / "agent"
+    pi_dir.mkdir(parents=True)
+    # CC / Codex / Kimi 目录不存在（autouse fixture 指向 tmp 下不存在的路径），只有 Pi
+
+    hooks.setup(auto=True, quiet=True)
+    ext = tmp_path / "_home" / ".pi" / "agent" / "extensions" / "tt-statusline.ts"
+    assert ext.exists()
+    content = ext.read_text(encoding="utf-8")
+    assert content.startswith("// token-tracker-managed")
+    assert "__TT_PI_STATUSLINE_ARGV__" not in content  # argv 已烘焙注入
+    assert os.path.exists(hooks.PI_STATUSLINE_HOOK_PATH)
+    assert config.pi_statusline_intent() is True
+    assert hooks.is_setup() is True
+    assert hooks.needs_update() is False
+
+    state = tmp_path / "_tt" / "tt-pi-statusline.json"
+    state.write_text("{}", encoding="utf-8")  # 模拟运行产物
+    hooks.unsetup()
+    assert not ext.exists()
+    assert not os.path.exists(hooks.PI_STATUSLINE_HOOK_PATH)
+    assert not state.exists()
+
+
+def test_setup_pi_statusline_keeps_user_custom_extension(tmp_path):
+    # do-no-harm：同名非 tt 托管扩展 → 推荐默认不接管、setup 不覆盖（同 Kimi tui.toml 哲学）。
+    pi_dir = tmp_path / "_home" / ".pi" / "agent"
+    ext = pi_dir / "extensions" / "tt-statusline.ts"
+    ext.parent.mkdir(parents=True)
+    ext.write_text("// 用户自己的扩展\nexport default function () {}\n", encoding="utf-8")
+
+    hooks.setup(auto=True, quiet=True)
+
+    assert ext.read_text(encoding="utf-8").startswith("// 用户自己的扩展")  # 未被覆盖
+    assert config.pi_statusline_intent() is False  # 推荐默认探测到自定义 → opt-out
+    assert hooks.is_setup() is True  # 意图 False 是明确不要，is_setup 不强求文件
+
+
+def _write_pi_session(pi_dir, rows):
+    session_file = pi_dir / "sessions" / "--home-downey-proj--" / "2026-08-27T03-04-13-688Z_s1.jsonl"
+    session_file.parent.mkdir(parents=True, exist_ok=True)
+    with open(session_file, "w", encoding="utf-8") as f:
+        f.write(json.dumps({"type": "session", "version": 3, "id": "s1", "cwd": "/proj"}) + "\n")
+        for row in rows:
+            f.write(row + "\n")
+    return session_file
+
+
+def _pi_assistant(i, o, msg_id="m1", total=0, cost=0.0):
+    return json.dumps({
+        "type": "message", "id": msg_id, "timestamp": "2026-08-27T03:04:55.779Z",
+        "message": {"role": "assistant", "provider": "deepseek-com", "model": "deepseek-v4-flash",
+                    "usage": {"input": i, "output": o, "cacheRead": 0, "cacheWrite": 0,
+                              "totalTokens": total or (i + o),
+                              "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0,
+                                       "total": cost}}},
+    })
+
+
+def _run_pi_statusline(script, payload, home, pi_dir):
+    # pi.exec 不支持 stdin：payload 走 argv[1]（与扩展调用方式一致）
+    env = dict(os.environ, HOME=str(home), PI_CODING_AGENT_DIR=str(pi_dir))
+    return subprocess.run([sys.executable, str(script), json.dumps(payload)],
+                          text=True, capture_output=True, env=env)
+
+
+def test_pi_statusline_script_renders_one_line_and_accumulates(tmp_path):
+    # 脚本级：[项目] | Total | Cost | Model | Ctx（无 Limit 段）；jsonl 按 offset 增量累计；
+    # Ctx 窗口从 models.json 读（payload contextWindow=0 时回退）；终端映射写 tt-terminal-map.json。
+    script = tmp_path / "pi-statusline.py"
+    script.write_text(hooks._render_pi_statusline_hook(), encoding="utf-8")
+    home = tmp_path / "home"
+    home.mkdir()
+    pi_dir = tmp_path / "pi-home"
+    (pi_dir / "models.json").parent.mkdir(parents=True, exist_ok=True)
+    (pi_dir / "models.json").write_text(json.dumps({"providers": {
+        "deepseek-com": {"models": [{"id": "deepseek-v4-flash", "contextWindow": 128000}]}}}),
+        encoding="utf-8")
+    session_file = _write_pi_session(pi_dir, [_pi_assistant(10000, 2000, msg_id="m1", cost=0.05)])
+    payload = {"sessionFile": str(session_file), "cwd": str(tmp_path),
+               "model": "deepseek-com/deepseek-v4-flash", "contextWindow": 0}
+
+    r1 = _run_pi_statusline(script, payload, home, pi_dir)
+    assert r1.returncode == 0
+    lines = r1.stdout.splitlines()
+    assert len(lines) == 1  # 扩展取 stdout 首行：脚本必须单条输出
+    line1 = lines[0]
+    assert "Total: 12k" in line1 and "Cost: $0.05" in line1
+    assert "Model: deepseek-com/deepseek-v4-flash" in line1
+    assert "Ctx:" in line1 and "9%" in line1  # 12000 / 128000（models.json 回退窗口）
+    assert "5h" not in line1 and "7d" not in line1  # 无 Limit 段
+
+    # 第二帧：追加一条 assistant message → 按 offset 增量累计（不重复计数）
+    with open(session_file, "a", encoding="utf-8") as f:
+        f.write(_pi_assistant(20000, 4000, msg_id="m2", total=36000, cost=0.10) + "\n")
+    r2 = _run_pi_statusline(script, payload, home, pi_dir)
+    line2 = r2.stdout.splitlines()[0]
+    assert "Total: 36k" in line2 and "Cost: $0.15" in line2
+    assert "28%" in line2  # Ctx 取末条 assistant 的 totalTokens：36000 / 128000
+    state = json.loads((home / ".config" / "token-tracker" / "tt-pi-statusline.json").read_text())
+    assert state[str(session_file)]["offset"] == session_file.stat().st_size
+
+    # 宽度降级：width 很窄时丢 Ctx / Cost 段
+    r3 = _run_pi_statusline(script, {**payload, "width": 40}, home, pi_dir)
+    line3 = r3.stdout.splitlines()[0]
+    assert "Ctx:" not in line3 and "Cost:" not in line3
+
+
+def test_pi_statusline_script_fail_open(tmp_path):
+    # argv 损坏 / 空输入：仍输出至多一行，绝不 traceback 到 stdout。
+    script = tmp_path / "pi-statusline.py"
+    script.write_text(hooks._render_pi_statusline_hook(), encoding="utf-8")
+    home = tmp_path / "home"
+    home.mkdir()
+    for argv in (["not json{{{"], []):
+        r = subprocess.run([sys.executable, str(script), *argv], input="", text=True,
+                           capture_output=True, env=dict(os.environ, HOME=str(home)))
+        assert r.returncode == 0
+        assert "Traceback" not in r.stdout
+        assert len(r.stdout.splitlines()) <= 1

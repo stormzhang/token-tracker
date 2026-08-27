@@ -426,6 +426,7 @@ def test_scan_sessions_caps_at_max_sessions(monkeypatch):
     monkeypatch.setattr(sidebar, "_scan_claude_sessions", lambda *a, **k: fake)
     monkeypatch.setattr(sidebar, "_scan_codex_sessions", lambda *a, **k: [])
     monkeypatch.setattr(sidebar, "_scan_kimi_sessions", lambda *a, **k: [])  # 不读真实 ~/.kimi-code
+    monkeypatch.setattr(sidebar, "_scan_pi_sessions", lambda *a, **k: [])  # 不读真实 ~/.pi
     got = sidebar.scan_sessions()
     assert len(got) == 10
     assert [s.session_id for s in got] == [f"s{i}" for i in range(10)]  # 最新的 10 个

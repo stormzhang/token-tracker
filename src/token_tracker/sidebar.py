@@ -9,6 +9,9 @@
 - Kimi wire jsonl（`~/.kimi-code/sessions/<wd_*>/<session_*>/agents/main/wire.jsonl`）——
   `turn.prompt`（origin.kind=="user"）是提示词来源；`usage.record` 给模型；
   `tool.call`/`tool.result` 配对判 pending；项目名取自同目录 state.json 的 cwd（兼容旧版 workDir）。
+- Pi 会话 jsonl（`~/.pi/agent/sessions/<slug>/<ts>_<uuid>.jsonl`，格式 version 3 内部格式）——
+  首行 session 头给 id/cwd；role=user 的 message 是提示词来源；assistant message 的
+  toolCall/toolResult 配对判 pending；model_change / assistant message 给模型。宽松降级解析。
 - 心跳 `config.STATUS_FILE`（CC statusline 每帧落盘）——`session_id` + `_received_at`
   判「正在跑」，白拿、零新增开销；Codex Stop hook 的终端定位单独落
   `config.TERMINAL_MAP_FILE`，读取时与 CC status 文件里的映射合并。
@@ -36,6 +39,7 @@ from .adapters.util import (
     kimi_home,
     kimi_project_from_session_dir,
     parse_epoch_ms,
+    pi_home,
     project_from_cwd,
 )
 
@@ -69,6 +73,8 @@ _CODEX_SKIP_PREFIXES = ("# AGENTS.md instructions", "<user_instructions", "<envi
                         ">>> TRANSCRIPT")
 # Kimi 里非「人敲的提示词」的内容前缀（cron 触发信封 / harness 注入 / 命令记录）
 _KIMI_SKIP_PREFIXES = ("<cron-fire", "<system-reminder", "<command-")
+# Pi 里非「人敲的提示词」的内容前缀（harness 注入）
+_PI_SKIP_PREFIXES = ("<system-reminder",)
 
 _CACHE_MAX = 512  # 解析缓存上限（常驻进程防无限增长，超了整体重建）
 
@@ -149,6 +155,17 @@ class _KimiParseState:
     last_event: datetime | None = None
 
 
+@dataclass
+class _PiParseState:
+    session_id: str = ""
+    project: str = "unknown"
+    prompts: list[Prompt] = field(default_factory=list)
+    pending_calls: set[str] = field(default_factory=set)  # 已 call 未 result 的 toolCall id
+    model: str = ""
+    last_reply: str = ""
+    last_event: datetime | None = None
+
+
 # 按 (path, max_prompts) → (mtime_ns, size, result) 缓存：相同条数且文件未变才复用。
 # 解析结果已经按 max_prompts 截断（None 表示保留全部），参数必须进 key，避免先查 2 条后
 # 再查 5 条或全部时仍只返回 2 条。
@@ -172,6 +189,8 @@ def scan_sessions(hours_back: int = DEFAULT_HOURS_BACK,
         sessions.extend(_scan_codex_sessions(cutoff, now, heartbeat, max_prompts, term_map=term_map))
     if agent_ids is None or "kimi" in agent_ids:
         sessions.extend(_scan_kimi_sessions(cutoff, now, heartbeat, max_prompts, term_map=term_map))
+    if agent_ids is None or "pi" in agent_ids:
+        sessions.extend(_scan_pi_sessions(cutoff, now, heartbeat, max_prompts, term_map=term_map))
     sessions.sort(key=lambda s: s.last_activity, reverse=True)
     return sessions[:max_sessions]
 
@@ -776,6 +795,121 @@ def _consume_kimi_loop_event(event: dict, state: _KimiParseState) -> None:
             state.pending_question = question or state.pending_question
     elif event_type == "tool.result":
         call_id = event.get("toolCallId")
+        if isinstance(call_id, str):
+            state.pending_calls.discard(call_id)
+
+
+# --- Pi（~/.pi/agent/sessions/<slug>/<ts>_<uuid>.jsonl） ---
+
+def _scan_pi_sessions(cutoff: datetime, now: datetime,
+                      heartbeat: tuple[str, datetime] | None,
+                      max_prompts: int | None,
+                      sessions_dir: str | None = None,
+                      term_map: dict[str, dict] | None = None) -> list[LiveSession]:
+    """扫描 `<pi_home>/sessions/<slug>/*.jsonl`。
+    sessions_dir 供测试注入。Pi 没有会话注册表，活跃度靠事件时间窗口判断（同 Codex/Kimi）。"""
+    term_map = term_map or {}
+    base = Path(sessions_dir) if sessions_dir is not None else Path(pi_home()) / "sessions"
+    if not base.is_dir():
+        return []
+    sessions: list[LiveSession] = []
+    seen: set[str] = set()
+    for path in base.glob("*/*.jsonl"):
+        mtime, stamp, parsed = _cache_get(path, max_prompts)
+        if mtime <= 0:
+            continue
+        mtime_dt = datetime.fromtimestamp(mtime, UTC)
+        if mtime_dt < cutoff:  # 初筛：内容事件时间必然 ≤ mtime
+            continue
+        if parsed is None:
+            parsed = _parse_pi(path, max_prompts)
+            if parsed is None:
+                continue
+            if stamp is not None:
+                _cache_put(path, max_prompts, parsed, stamp)
+        if not parsed.prompts or parsed.session_id in seen:
+            continue
+        last_activity = parsed.last_event or mtime_dt
+        if last_activity < cutoff:
+            continue
+        seen.add(parsed.session_id)
+        sessions.append(LiveSession(
+            agent_id="pi",
+            session_id=parsed.session_id,
+            project=parsed.project,
+            last_activity=last_activity,
+            state=_infer_state(now, last_activity, parsed.pending_tool,
+                               _heartbeat_fresh(heartbeat, parsed.session_id, now)),
+            prompts=parsed.prompts,
+            model=parsed.model,
+            terminal=term_map.get(parsed.session_id) or {},
+            next_hint=parsed.next_hint,
+        ))
+    return sessions
+
+
+def _parse_pi(path: Path, max_prompts: int | None) -> _Parsed | None:
+    # 布局：…/sessions/<slug>/<ts>_<uuid>.jsonl；首行 session 头给 id/cwd
+    state = _PiParseState()
+    for data in iter_jsonl_dicts(path):
+        ts = _parse_ts(data.get("timestamp"))
+        if ts and (state.last_event is None or ts > state.last_event):
+            state.last_event = ts
+        dtype = data.get("type")
+        if dtype == "session":
+            session_id = data.get("id")
+            if isinstance(session_id, str) and session_id:
+                state.session_id = session_id
+            cwd = data.get("cwd")
+            if isinstance(cwd, str) and cwd:
+                state.project = project_from_cwd(cwd)
+        elif dtype == "model_change":
+            provider, model_id = data.get("provider"), data.get("modelId")
+            if isinstance(provider, str) and provider and isinstance(model_id, str) and model_id:
+                state.model = f"{provider}/{model_id}"
+        elif dtype == "message":
+            _consume_pi_message(data, ts, state)
+    if not state.prompts:
+        return None
+    if not state.session_id:
+        state.session_id = path.stem
+    prompts = state.prompts if max_prompts is None else state.prompts[-max_prompts:]
+    return _Parsed(state.session_id, state.project, prompts, bool(state.pending_calls), state.model,
+                   next_hint=_hint_text(state.last_reply),
+                   last_event=state.last_event)
+
+
+def _consume_pi_message(data: dict, ts: datetime | None, state: _PiParseState) -> None:
+    message = data.get("message")
+    if not isinstance(message, dict):
+        return
+    role = message.get("role")
+    content = message.get("content")
+    blocks = content if isinstance(content, list) else []
+    if role == "user":
+        parts = [b.get("text", "") for b in blocks
+                 if isinstance(b, dict) and b.get("type") == "text"]
+        kept = [frag for frag in (p.strip() for p in parts)
+                if frag and not frag.startswith(_PI_SKIP_PREFIXES) and not _SLASH_COMMAND_RE.match(frag)]
+        if kept:
+            state.prompts.append(Prompt(text="\n".join(kept), timestamp=ts))
+    elif role == "assistant":
+        provider, model_id = message.get("provider"), message.get("model")
+        if isinstance(provider, str) and provider and isinstance(model_id, str) and model_id:
+            state.model = f"{provider}/{model_id}"
+        for b in blocks:
+            if not isinstance(b, dict):
+                continue
+            if b.get("type") == "text":
+                text = b.get("text") or ""
+                if text.strip():
+                    state.last_reply = text
+            elif b.get("type") == "toolCall":
+                call_id = b.get("id")
+                if isinstance(call_id, str) and call_id:
+                    state.pending_calls.add(call_id)
+    elif role == "toolResult":
+        call_id = message.get("toolCallId")
         if isinstance(call_id, str):
             state.pending_calls.discard(call_id)
 

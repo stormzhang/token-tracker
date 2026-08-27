@@ -10,7 +10,7 @@ import tomllib
 from collections.abc import Callable
 from importlib import resources
 
-from .adapters.util import codex_home, kimi_home
+from .adapters.util import codex_home, kimi_home, pi_home
 
 CODEX_HOOKS = os.path.join(codex_home(), "hooks.json")
 KIMI_CONFIG = os.path.join(kimi_home(), "config.toml")
@@ -659,4 +659,72 @@ def uninstall_kimi_statusline() -> bool:
             start -= 1
         del lines[start:end]
     _write_text_atomic(KIMI_TUI, "".join(lines))
+    return True
+
+
+# --- Pi（~/.pi/agent/extensions/ 的 tt-statusline.ts 扩展） ---
+#
+# Pi 扩展放 `~/.pi/agent/extensions/*.ts` 即被 jiti 自动加载（官方 extensions.md），无需改
+# settings.json。托管判定同 Skill 惯例：文件首行 marker 在才归 tt 管；同名非托管文件视为
+# 用户自定义，绝不覆盖（do-no-harm，同 CC/Kimi 哲学）。
+
+PI_EXTENSION_DIR = os.path.join(pi_home(), "extensions")
+PI_EXTENSION_PATH = os.path.join(PI_EXTENSION_DIR, "tt-statusline.ts")
+_PI_EXTENSION_TEMPLATE = "pi_extension.ts"
+_PI_EXTENSION_MARKER = "// token-tracker-managed"
+
+
+def render_pi_extension(argv: list[str]) -> str:
+    """渲染扩展 TS：注入 [python, pi-statusline.py] argv（JSON 数组字面量，绝对路径不依赖 PATH）。"""
+    content = _load_skill_resource(_PI_EXTENSION_TEMPLATE, package="token_tracker.templates")
+    return content.replace("__TT_PI_STATUSLINE_ARGV__", json.dumps(argv))
+
+
+def pi_extension_managed() -> bool:
+    """扩展文件存在且首行含 tt marker（用户同名自定义不算）。"""
+    try:
+        with open(PI_EXTENSION_PATH, encoding="utf-8") as f:
+            return _PI_EXTENSION_MARKER in f.readline()
+    except OSError:
+        return False
+
+
+def pi_extension_needs_sync(argv: list[str]) -> bool:
+    """非用户自定义 且 内容与当前渲染结果不一致 → 需要同步。用户自定义返回 False（不主动覆盖）。"""
+    if os.path.exists(PI_EXTENSION_PATH) and not pi_extension_managed():
+        return False
+    try:
+        with open(PI_EXTENSION_PATH, encoding="utf-8") as f:
+            return f.read() != render_pi_extension(argv)
+    except OSError:
+        return True
+
+
+def install_pi_extension(argv: list[str]) -> bool:
+    """写入扩展 TS（原子写）；已是最新返回 False；同名非托管文件抛 FileExistsError（不覆盖）。"""
+    if os.path.exists(PI_EXTENSION_PATH) and not pi_extension_managed():
+        raise FileExistsError(PI_EXTENSION_PATH)
+    expected = render_pi_extension(argv)
+    try:
+        with open(PI_EXTENSION_PATH, encoding="utf-8") as f:
+            if f.read() == expected:
+                return False
+    except OSError:
+        pass
+    _write_text_atomic(PI_EXTENSION_PATH, expected)
+    return True
+
+
+def uninstall_pi_extension() -> bool:
+    """只删 tt 托管的扩展文件（marker 判定），用户自定义同名文件不动。"""
+    if not pi_extension_managed():
+        return False
+    try:
+        os.remove(PI_EXTENSION_PATH)
+    except FileNotFoundError:
+        return False
+    try:
+        os.rmdir(PI_EXTENSION_DIR)  # 用户还有其它扩展就保留目录
+    except OSError:
+        pass
     return True
