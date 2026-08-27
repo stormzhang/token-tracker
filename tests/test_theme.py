@@ -280,10 +280,11 @@ def test_run_wizard_saves_theme(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "_LEGACY_LANG_PATH", str(tmp_path / "lang.json"))
 
     # 顺序：选语言（zh）→ 选主题（nord）→ 增强项 Yes/No（按检测到的 agent 数量）
-    # has_cc / has_codex / has_kimi 固定，问题数稳定；多余 mock 序列不会被消耗。
+    # has_cc / has_codex / has_kimi / has_pi 固定，问题数稳定；多余 mock 序列不会被消耗。
     monkeypatch.setattr(wizard, "_has_cc", lambda: True)
     monkeypatch.setattr(wizard, "_has_codex", lambda: True)
     monkeypatch.setattr(wizard, "_has_kimi", lambda: False)
+    monkeypatch.setattr(wizard, "_has_pi", lambda: False)
     selects = iter(["zh", "nord", "Yes", "Yes"])
     monkeypatch.setattr("questionary.select", lambda *a, **k: _FakeQ(next(selects)))
     monkeypatch.setattr(wizard, "setup", lambda **kw: None)  # 不真落地配置

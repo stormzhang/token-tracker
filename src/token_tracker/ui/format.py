@@ -5,8 +5,8 @@ from rich.text import Text
 from .console import get_console
 from .theme import _S
 
-AGENT_SHORT = {"claude-code": "Claude", "codex": "Codex", "kimi": "Kimi"}
-AGENT_LABEL = {"claude-code": "Claude Code", "codex": "Codex", "kimi": "Kimi Code"}
+AGENT_SHORT = {"claude-code": "Claude", "codex": "Codex", "kimi": "Kimi", "pi": "Pi"}
+AGENT_LABEL = {"claude-code": "Claude Code", "codex": "Codex", "kimi": "Kimi Code", "pi": "Pi"}
 
 MODEL_SHORT = {
     "claude-fable-5": "Fable 5",

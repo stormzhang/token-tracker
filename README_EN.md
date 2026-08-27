@@ -1,6 +1,6 @@
 # Token Tracker
 
-Track token usage across local AI agents. Supports **Claude Code**, **Codex**, and **Kimi Code**.
+Track token usage across local AI agents. Supports **Claude Code**, **Codex**, **Kimi Code**, and **Pi**.
 
 Custom StatusLine integration + CLI Dashboard — see token usage, cost, and rate limits at a glance.
 
@@ -12,8 +12,8 @@ Custom StatusLine integration + CLI Dashboard — see token usage, cost, and rat
 
 ## Highlights
 
-- **Unified multi-agent tracking** — Claude Code + Codex + Kimi Code in one place, grouped by source
-- **Status line integration** — Claude Code via official StatusLine API; **Codex industry-first faux statusline** (hook-injected two-line truecolor status — bringing an official-unsupported capability to Codex); Kimi Code via the official `status_line` API
+- **Unified multi-agent tracking** — Claude Code + Codex + Kimi Code + Pi in one place, grouped by source
+- **Status line integration** — Claude Code via official StatusLine API; **Codex industry-first faux statusline** (hook-injected two-line truecolor status — bringing an official-unsupported capability to Codex); Kimi Code via the official `status_line` API; Pi via the official extension system (`ctx.ui.setStatus`)
 - **Live sidebar** — `tt sidebar` shows all active sessions (Claude Code + Codex + Kimi Code); `$tt-sidebar` in Codex or `/skill:tt-sidebar` in Kimi Code opens a current-session-only pane on the right at one-third width
 - **Rate limit monitoring** — real-time 5h / 7d quota usage with reset countdown
 - **Multi-dimensional cost analysis** — per-session, daily, weekly, monthly cost breakdown

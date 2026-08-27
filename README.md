@@ -1,6 +1,6 @@
 # Token Tracker (tt)
 
-本地 AI Agent Token 消耗追踪/分析工具，支持 **Claude Code**、**Codex** 和 **Kimi Code**。
+本地 AI Agent Token 消耗追踪/分析工具，支持 **Claude Code**、**Codex**、**Kimi Code** 和 **Pi**。
 
 自定义 StatusLine 状态栏 + CLI Dashboard，实时查看 token 用量、等效成本、限额状态。
 
@@ -12,8 +12,8 @@
 
 ## 功能亮点
 
-- **多 Agent 统一追踪** — Claude Code + Codex + Kimi Code 统一读取，多 Agent 按来源分组
-- **状态栏集成** — Claude Code 用官方 StatusLine 接口；**Codex 业界首创伪 statusline 方案**（hook 注入两行真彩色状态栏，把官方未开放的能力在 Codex 里做了出来）；Kimi Code 用官方 `status_line` 接口
+- **多 Agent 统一追踪** — Claude Code + Codex + Kimi Code + Pi 统一读取，多 Agent 按来源分组
+- **状态栏集成** — Claude Code 用官方 StatusLine 接口；**Codex 业界首创伪 statusline 方案**（hook 注入两行真彩色状态栏，把官方未开放的能力在 Codex 里做了出来）；Kimi Code 用官方 `status_line` 接口；Pi 用官方扩展系统（`ctx.ui.setStatus`）
 - **实时侧边栏** — `tt sidebar` 窄窗格常驻面板：全部活跃会话一屏总览（状态灯 + 最近提示词 + 「下一步」建议），点击会话直达对应 iTerm2 / tmux 窗格
 - **当前会话自动分屏** — Codex 中显式执行 `$tt-sidebar`，在原会话右侧自动打开 1/3 宽度的独立提示词侧边栏
 - **限额监控** — 实时 5h / 7d 配额百分比 + 重置倒计时

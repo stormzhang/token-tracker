@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from importlib import resources
 
 from . import config, sidebar_install
-from .adapters.util import claude_home, codex_home, kimi_home
+from .adapters.util import claude_home, codex_home, kimi_home, pi_home
 from .analyzer import cost as _cost_mod
 from .i18n import t
 from .ui import themes
@@ -17,19 +17,23 @@ from .ui.console import get_console
 _CLAUDE = claude_home()  # CLAUDE_CONFIG_DIR 覆盖 / ~/.claude
 _CODEX = codex_home()    # CODEX_HOME 覆盖 / ~/.codex
 _KIMI = kimi_home()      # KIMI_CODE_HOME 覆盖 / ~/.kimi-code
+_PI = pi_home()          # PI_CODING_AGENT_DIR 覆盖 / ~/.pi/agent
 
 
 @dataclass
 class SetupComponents:
-    """组件开关。CC statusLine 接管、Codex 伪 statusline（Stop hook）与 Kimi statusline
-    （tui.toml [status_line].command）均为可选组件，意图持久化到 config.json。"""
+    """组件开关。CC statusLine 接管、Codex 伪 statusline（Stop hook）、Kimi statusline
+    （tui.toml [status_line].command）与 Pi statusline（extensions 扩展）均为可选组件，
+    意图持久化到 config.json。"""
     cc_statusline: bool = True
     codex_faux_statusline: bool = True
     kimi_statusline: bool = True
+    pi_statusline: bool = True
 
     @classmethod
     def all_on(cls) -> "SetupComponents":
-        return cls(cc_statusline=True, codex_faux_statusline=True, kimi_statusline=True)
+        return cls(cc_statusline=True, codex_faux_statusline=True, kimi_statusline=True,
+                   pi_statusline=True)
 
 # tt 自己的产物（statusline 脚本 + 缓存 + 备份）集中放 ~/.config/token-tracker（XDG，跟 theme/lang 同处）；
 # settings.json / config.toml 是「改 agent 自己的配置」、必须留 agent 目录。statusLine/hook 的 command
@@ -42,6 +46,9 @@ CODEX_DIR = _CODEX
 CODEX_CONFIG = os.path.join(CODEX_DIR, "config.toml")     # 仅迁移旧内联 Stop；新 Hook 统一写 hooks.json
 CODEX_STATUSLINE_HOOK_PATH = os.path.join(_TT, "codex-statusline.py")
 KIMI_STATUSLINE_HOOK_PATH = os.path.join(_TT, "kimi-statusline.py")
+PI_STATUSLINE_HOOK_PATH = os.path.join(_TT, "pi-statusline.py")
+# Pi statusline 的会话 jsonl offset / 累计缓存（脚本写；与 Kimi 侧分文件，避免并发互相覆盖）
+PI_STATUSLINE_STATE_PATH = os.path.join(_TT, "tt-pi-statusline.json")
 # Kimi statusline 的 wire offset / 累计缓存（脚本写；与 CC 心跳、终端映射分文件，避免并发互相覆盖）
 KIMI_STATUSLINE_STATE_PATH = os.path.join(_TT, "tt-kimi-statusline.json")
 # Kimi statusline 的 5h/7d 限额缓存（模板的 detached --refresh-quota 子进程写）
@@ -51,6 +58,7 @@ TERMINAL_MAP_FILE = config.TERMINAL_MAP_FILE              # Codex Stop hook 采�
 HOOK_VERSION = "2.1"  # 2.0: 采集 _terminal_map（sidebar 点击跳转）；2.1: 共享状态无条件随帧携带、防异常帧清表
 STATUSLINE_HOOK_VERSION = "1.6"  # 1.4: 第三方 provider 显示会话 Cost；1.5: 无配额不挂 Limit: 前缀；1.6: Total 不再重复计 reasoning（实测 total_tokens==in+out）
 KIMI_STATUSLINE_HOOK_VERSION = "1.2"  # 1.2: Model 段加实际 effort（wire thinkingEffort），新增 Out t/s（output÷请求时长）
+PI_STATUSLINE_HOOK_VERSION = "1.0"  # 1.0: 首版（项目 | Total | Cost | Model | Ctx，无 Limit 段）
 
 CC_BACKUP_PATH = os.path.join(_TT, "cc-backup.json")
 CODEX_BACKUP_LEGACY = os.path.join(_TT, "codex-backup.json")  # 老用户残留，unsetup 时还能恢复
@@ -169,6 +177,55 @@ def kimi_statusline_active() -> bool:
     return sidebar_install.kimi_statusline_hook_present()
 
 
+# --- Pi statusline（~/.pi/agent/extensions/tt-statusline.ts 扩展调 pi-statusline.py 脚本，
+# ctx.ui.setStatus 显示；扩展目录自动加载，不改 pi 任何配置文件） ---
+
+
+def _render_pi_statusline_hook() -> str:
+    """注入版本号 + 当前主题 statusline 配色（truecolor），得到要落盘的 Pi statusline 脚本。
+    跟随主题：tt theme set 经 update_hook 重烘焙（同 Kimi statusline）。"""
+    name = config.resolve_theme()
+    return (
+        _load_template("pi_statusline.py")
+        .replace("__PI_STATUSLINE_HOOK_VERSION__", PI_STATUSLINE_HOOK_VERSION)
+        .replace("__STATUSLINE_TRUECOLOR__", repr(themes.theme_to_statusline_ansi(name)))
+    )
+
+
+def _write_pi_statusline_script() -> None:
+    os.makedirs(_TT, exist_ok=True)
+    with open(PI_STATUSLINE_HOOK_PATH, "w", encoding="utf-8") as f:
+        f.write(_render_pi_statusline_hook())
+    if os.name != "nt":
+        os.chmod(PI_STATUSLINE_HOOK_PATH,
+                 os.stat(PI_STATUSLINE_HOOK_PATH).st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
+
+def _installed_pi_statusline_version() -> str | None:
+    try:
+        with open(PI_STATUSLINE_HOOK_PATH, encoding="utf-8") as f:
+            for line in f:
+                if line.startswith("__version__"):
+                    return line.split("=", 1)[1].strip().strip('"\'')
+    except OSError:
+        pass
+    return None
+
+
+def _pi_statusline_argv() -> list[str]:
+    """扩展 exec 的 argv：[python 解释器, pi-statusline.py 脚本]（绝对路径，不依赖 PATH）。"""
+    return [sys.executable or "python3", PI_STATUSLINE_HOOK_PATH]
+
+
+def pi_statusline_active() -> bool:
+    """双因素：用户意图 AND 实际装好（脚本存在 + 扩展已安装且为 tt 托管）。"""
+    if config.pi_statusline_intent() is not True:
+        return False
+    if not os.path.exists(PI_STATUSLINE_HOOK_PATH):
+        return False
+    return sidebar_install.pi_extension_managed()
+
+
 # 迁移 / 卸载时定位 tt 旧版追加的整段 [[hooks.Stop]]——
 # 同时认新（codex-statusline）/ 旧（tt-statusline）两种特征码。
 # command 值兼容三代形态：双引号 basic string（最老）、单引号 literal 裸拼接（0.4.x）、
@@ -258,7 +315,9 @@ def recommended_components() -> SetupComponents:
     绝不静默替换用户自定义；否则已记录意图非 None → 用意图；否则 → True（全新 / 已是 tt 的 → 接管）。
     Codex 端无从探测「用户自己的 statusline」：已记录意图非 None → 用意图，否则 → True。
     Kimi 端探测 tui.toml（do-no-harm，同 CC 哲学）：用户自定义 status_line.command → False，
-    绝不静默替换；否则已记录意图非 None → 用意图；否则 → True。"""
+    绝不静默替换；否则已记录意图非 None → 用意图；否则 → True。
+    Pi 端探测扩展文件（do-no-harm）：同名非 tt 托管的 tt-statusline.ts → False；
+    否则已记录意图非 None → 用意图；否则 → True。"""
     cc = True
     if os.path.exists(CLAUDE_SETTINGS):
         try:
@@ -283,7 +342,13 @@ def recommended_components() -> SetupComponents:
     else:
         kimi_intent = config.kimi_statusline_intent()
         kimi = kimi_intent if kimi_intent is not None else True
-    return SetupComponents(cc_statusline=cc, codex_faux_statusline=codex, kimi_statusline=kimi)
+    if os.path.exists(sidebar_install.PI_EXTENSION_PATH) and not sidebar_install.pi_extension_managed():
+        pi = False  # 用户自己的同名扩展 → 不接管
+    else:
+        pi_intent = config.pi_statusline_intent()
+        pi = pi_intent if pi_intent is not None else True
+    return SetupComponents(cc_statusline=cc, codex_faux_statusline=codex, kimi_statusline=kimi,
+                           pi_statusline=pi)
 
 
 def is_setup() -> bool:
@@ -293,7 +358,8 @@ def is_setup() -> bool:
     has_cc = os.path.isdir(os.path.dirname(CLAUDE_SETTINGS))
     has_codex = os.path.isdir(CODEX_DIR)
     has_kimi = os.path.isdir(_KIMI)
-    if not has_cc and not has_codex and not has_kimi:
+    has_pi = os.path.isdir(_PI)
+    if not has_cc and not has_codex and not has_kimi and not has_pi:
         return False
     if has_cc:
         intent = config.cc_statusline_intent()
@@ -316,6 +382,12 @@ def is_setup() -> bool:
         if intent is None:  # 没跑过 wizard、没表达意图 → 视为未配（老用户升级后重走一次 setup）
             return False
         if intent and not kimi_statusline_active():
+            return False
+    if has_pi:
+        intent = config.pi_statusline_intent()
+        if intent is None:  # 没跑过 wizard、没表达意图 → 视为未配（老用户升级后重走一次 setup）
+            return False
+        if intent and not pi_statusline_active():
             return False
     return True
 
@@ -481,6 +553,17 @@ def needs_update() -> bool:
             return True
         if sidebar_install.kimi_statusline_needs_sync(_kimi_statusline_command()):
             return True
+    # setup_version 6 起，Pi statusline（extensions 扩展 + pi-statusline.py 脚本）也属于 setup 产物
+    #（双因素哲学同上：意图为 True 才要求实装，版本落后或扩展内容漂移由 update_hook 收敛）。
+    if (
+        os.path.isdir(_PI)
+        and config.setup_version() >= 6
+        and config.pi_statusline_intent() is True
+    ):
+        if _installed_pi_statusline_version() != PI_STATUSLINE_HOOK_VERSION:
+            return True
+        if sidebar_install.pi_extension_needs_sync(_pi_statusline_argv()):
+            return True
     return _cc_command_needs_sync()  # settings.json 里 command 格式过时也算待更新（issue #13/#14）
 
 
@@ -508,6 +591,18 @@ def update_hook() -> None:
             sidebar_install.install_kimi_statusline(_kimi_statusline_command())
         except ValueError:
             pass
+    # 意图为 True 才收敛 Pi statusline（重烘焙脚本 + 同步扩展）；用户同名自定义扩展
+    # 自动更新绝不覆盖（FileExistsError 跳过），只在显式 setup 时提示（同 tui.toml 哲学）。
+    if (
+        os.path.isdir(_PI)
+        and config.setup_version() >= 6
+        and config.pi_statusline_intent() is True
+    ):
+        _write_pi_statusline_script()
+        try:
+            sidebar_install.install_pi_extension(_pi_statusline_argv())
+        except FileExistsError:
+            pass
 
 
 # --- setup ---
@@ -523,8 +618,9 @@ def setup(auto: bool = False, components: SetupComponents | None = None, quiet: 
     has_cc = os.path.isdir(os.path.dirname(CLAUDE_SETTINGS))
     has_codex = os.path.isdir(CODEX_DIR)
     has_kimi = os.path.isdir(_KIMI)
+    has_pi = os.path.isdir(_PI)
 
-    if not has_cc and not has_codex and not has_kimi:
+    if not has_cc and not has_codex and not has_kimi and not has_pi:
         p(f"[red]{t('no_agent_install')}[/red]")
         return
 
@@ -553,6 +649,12 @@ def setup(auto: bool = False, components: SetupComponents | None = None, quiet: 
     else:
         if not auto:
             p(f"[dim]{t('kimi_not_found')}[/dim]")
+
+    if has_pi:
+        _setup_pi_statusline(components, quiet)
+    else:
+        if not auto:
+            p(f"[dim]{t('pi_not_found')}[/dim]")
 
     # setup 真正落地了，写入当前引导版本——后续启动 cli 不再触发"老用户重新引导"。
     # early-return 分支（无 agent）不会到这，符合语义。
@@ -773,12 +875,52 @@ def _setup_kimi_sidebar(quiet: bool = False) -> None:
         p(f"[dim]{t('kimi_hook_hint')}[/dim]")
 
 
+def _setup_pi_statusline(components: SetupComponents, quiet: bool = False) -> None:
+    """Pi 端装/卸 statusline（extensions/tt-statusline.ts 扩展 + pi-statusline.py 脚本）。
+    意图先落盘（镜像 _setup_kimi_statusline）。opt-out 删脚本 + 只摘 tt 托管扩展；
+    用户同名自定义扩展存在时即便选了 True 也绝不覆盖（do-no-harm，同 CC/Kimi 哲学）。"""
+    p = (lambda *a, **k: None) if quiet else get_console().print
+    config.save_pi_statusline(components.pi_statusline)  # 写入意图（任何文件操作之前）
+
+    if not components.pi_statusline:
+        _remove_pi_statusline_artifacts()
+        p(f"[dim]{t('pi_statusline_skipped')}[/dim]")
+        return
+
+    if os.path.exists(sidebar_install.PI_EXTENSION_PATH) and not sidebar_install.pi_extension_managed():
+        p(f"[yellow]{t('pi_statusline_skipped_custom', path=sidebar_install.PI_EXTENSION_PATH)}[/yellow]")
+        return
+
+    _write_pi_statusline_script()
+    try:
+        changed = sidebar_install.install_pi_extension(_pi_statusline_argv())
+    except FileExistsError:
+        # 并发/竞态下刚出现的用户自定义扩展——不覆盖；错误不受 quiet 抑制（同 kimi tui.toml 哲学）
+        get_console().print(
+            f"[yellow]{t('pi_statusline_skipped_custom', path=sidebar_install.PI_EXTENSION_PATH)}[/yellow]"
+        )
+        return
+    key = "pi_statusline_synced" if changed else "pi_statusline_installed"
+    p(f"[green]✓[/green] {t(key)}")
+    p(f"[dim]{t('pi_statusline_hint')}[/dim]")
+
+
+def _remove_pi_statusline_artifacts() -> None:
+    """删 Pi statusline 运行产物（脚本 + state 缓存含 lock）+ 只摘 tt 托管扩展。opt-out 与 unsetup 共用。"""
+    artifacts = [PI_STATUSLINE_HOOK_PATH, PI_STATUSLINE_STATE_PATH, f"{PI_STATUSLINE_STATE_PATH}.lock"]
+    for path in artifacts:
+        if os.path.exists(path):
+            os.remove(path)
+    sidebar_install.uninstall_pi_extension()
+
+
 # --- unsetup ---
 
 def unsetup() -> None:
     has_cc = os.path.isdir(os.path.dirname(CLAUDE_SETTINGS))
     has_codex = os.path.isdir(CODEX_DIR)
     has_kimi = os.path.isdir(_KIMI)
+    has_pi = os.path.isdir(_PI)
 
     if has_cc:
         _unsetup_claude()
@@ -788,7 +930,9 @@ def unsetup() -> None:
     if has_kimi:
         _unsetup_kimi_statusline()
         _unsetup_kimi_sidebar()
-    if not has_cc and not has_codex and not has_kimi:
+    if has_pi:
+        _unsetup_pi_statusline()
+    if not has_cc and not has_codex and not has_kimi and not has_pi:
         get_console().print(f"[dim]{t('no_agent_detected')}[/dim]")
 
 
@@ -900,3 +1044,20 @@ def _unsetup_kimi_sidebar() -> None:
         return
     if hook_removed:
         get_console().print(f"[green]✓[/green] {t('kimi_hooks_removed')}")
+
+
+def _unsetup_pi_statusline() -> None:
+    """卸载 Pi statusline：删脚本 + state 缓存（含 lock）+ 只摘 tt 托管扩展。
+    与其它 agent 一致：不动意图字段（用户重跑 tt setup 时可按原意图恢复）。"""
+    paths = [
+        PI_STATUSLINE_HOOK_PATH,
+        PI_STATUSLINE_STATE_PATH,
+        f"{PI_STATUSLINE_STATE_PATH}.lock",
+    ]
+    for path in paths:
+        if os.path.exists(path):
+            os.remove(path)
+            key = "deleted_file" if path == PI_STATUSLINE_HOOK_PATH else "deleted_cache"
+            get_console().print(f"[green]✓[/green] {t(key, path=path)}")
+    if sidebar_install.uninstall_pi_extension():
+        get_console().print(f"[green]✓[/green] {t('pi_statusline_removed')}")

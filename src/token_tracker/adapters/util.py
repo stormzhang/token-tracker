@@ -33,6 +33,15 @@ def kimi_home() -> str:
     return os.path.expanduser("~/.kimi-code")
 
 
+def pi_home() -> str:
+    """Pi 配置/数据根目录：`PI_CODING_AGENT_DIR` 优先，否则 `~/.pi/agent`（官方支持该环境变量覆盖，
+    见 pi 文档 environment-variables.md）。"""
+    env = os.environ.get("PI_CODING_AGENT_DIR", "").strip()
+    if env:
+        return env
+    return os.path.expanduser("~/.pi/agent")
+
+
 def iter_jsonl_dicts(path: Path | str) -> Iterator[dict]:
     """逐行读取 JSONL，只 yield dict 行。
 

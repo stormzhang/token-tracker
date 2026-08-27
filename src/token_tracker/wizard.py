@@ -122,6 +122,11 @@ def _has_kimi() -> bool:
     return os.path.isdir(kimi_home())
 
 
+def _has_pi() -> bool:
+    from .adapters.util import pi_home
+    return os.path.isdir(pi_home())
+
+
 def _ask_language(prefix: str = "") -> None:
     """每次都问语言（作为配置项之一、带步骤号；光标默认停在已存的语言上，回车即保留现状）。
     prompt 双语硬编码（此时 i18n 还没确定语言）；选完保存 + i18n.set_lang() 即时切换。
@@ -192,6 +197,7 @@ def ask_components(step_prefix_fn: Callable[[int], str] | None = None) -> SetupC
     cc = defaults.cc_statusline
     codex_faux = defaults.codex_faux_statusline
     kimi = defaults.kimi_statusline
+    pi = defaults.pi_statusline
     qi = 1
     prefix = step_prefix_fn or (lambda i: "")
 
@@ -210,14 +216,25 @@ def ask_components(step_prefix_fn: Callable[[int], str] | None = None) -> SetupC
         kimi = _ask_yes_no(f"{prefix(qi)}{t('wizard_q_kimi_statusline')}", default=kimi)
         qi += 1
 
-    return SetupComponents(cc_statusline=cc, codex_faux_statusline=codex_faux, kimi_statusline=kimi)
+    # Q4: Pi statusline（仅 Pi 存在）
+    if _has_pi():
+        pi = _ask_yes_no(f"{prefix(qi)}{t('wizard_q_pi_statusline')}", default=pi)
+        qi += 1
+
+    return SetupComponents(cc_statusline=cc, codex_faux_statusline=codex_faux,
+                           kimi_statusline=kimi, pi_statusline=pi)
 
 
 def _print_summary(console, choice: str, components: SetupComponents) -> None:
     """选完所有项后的综合简洁总结：键值对齐的配置回顾 + 一行重启/下一步提示。
     层次：暗色标签 + 值正常色、状态用 ✓/✗ 图标、✓ 配置完成头用绿。
     状态栏行显示用双因素（意图 AND 文件存在）。"""
-    from .hooks import cc_statusline_active, codex_statusline_active, kimi_statusline_active  # 延迟 import 避免循环
+    from .hooks import (  # 延迟 import 避免循环
+        cc_statusline_active,
+        codex_statusline_active,
+        kimi_statusline_active,
+        pi_statusline_active,
+    )
     base = themes.get_theme("mocha")["base"]
     green, pink, dim = base["green"], base["pink"], base["overlay0"]
     lang_name = "中文" if i18n.LANG == "zh" else "English"  # 语言名本身不翻译
@@ -235,6 +252,10 @@ def _print_summary(console, choice: str, components: SetupComponents) -> None:
         # 双因素（意图 AND 文件实装）；_setup_kimi_statusline 已写入意图，此处直接查 active
         state = f"[{green}]✓[/{green}]" if kimi_statusline_active() else f"[{dim}]✗[/{dim}]"
         rows.append((t("wizard_summary_kimi_statusline"), state))
+    if _has_pi():
+        # 双因素（意图 AND 文件实装）；_setup_pi_statusline 已写入意图，此处直接查 active
+        state = f"[{green}]✓[/{green}]" if pi_statusline_active() else f"[{dim}]✗[/{dim}]"
+        rows.append((t("wizard_summary_pi_statusline"), state))
     key_w = max(_disp_width(k) for k, _ in rows)
 
     console.print()
@@ -257,7 +278,8 @@ def run_wizard() -> None:
     console = get_console()
 
     # 总步数：语言 + 主题 + 增强项问题数（按检测到的 agent 决定）
-    enhancement_q = (1 if _has_cc() else 0) + (1 if _has_codex() else 0) + (1 if _has_kimi() else 0)
+    enhancement_q = ((1 if _has_cc() else 0) + (1 if _has_codex() else 0)
+                     + (1 if _has_kimi() else 0) + (1 if _has_pi() else 0))
     total = 2 + enhancement_q
 
     # 欢迎行（品牌 + 版本，缩进 2）固定英文不随语言；署名移到末尾 sign-off 行；下一行显示检测到的 agent
