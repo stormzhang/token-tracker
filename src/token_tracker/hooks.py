@@ -211,7 +211,13 @@ def _read_codex_config() -> tuple[str, dict] | None:
 
 
 def _codex_statusline_command(python: str | None = None) -> str:
-    return _build_cc_command(python or sys.executable or "python3", CODEX_STATUSLINE_HOOK_PATH)
+    executable = python or sys.executable or "python3"
+    if os.name != "nt":
+        home = os.path.realpath(os.path.expanduser("~"))
+        paths = (os.path.abspath(executable), os.path.abspath(CODEX_STATUSLINE_HOOK_PATH))
+        if all(os.path.commonpath((home, path)) == home for path in paths):
+            return " ".join(sidebar_install._portable_shell_path(path) for path in paths)
+    return _build_cc_command(executable, CODEX_STATUSLINE_HOOK_PATH)
 
 
 def _inline_codex_statusline_present() -> bool:

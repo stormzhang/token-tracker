@@ -395,6 +395,34 @@ def test_codex_statusline_windows_path_is_json_safe(tmp_path, monkeypatch):
     assert parsed["hooks"]["Stop"][0]["hooks"][0]["command"] == command
 
 
+def test_codex_statusline_home_command_is_portable_and_idempotent(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    executable = home / ".local" / "bin" / "python"
+    script = home / ".config" / "token-tracker" / "codex-statusline.py"
+    codex_hooks = tmp_path / "hooks.json"
+    monkeypatch.setattr(hooks, "CODEX_STATUSLINE_HOOK_PATH", str(script))
+    monkeypatch.setattr(hooks.sys, "executable", str(executable))
+    monkeypatch.setattr(sidebar_install, "CODEX_HOOKS", str(codex_hooks))
+    monkeypatch.setattr(sidebar_install.os.path, "expanduser", lambda value: str(home) if value == "~" else value)
+
+    command = hooks._codex_statusline_command()
+    assert command == '"$HOME/.local/bin/python" "$HOME/.config/token-tracker/codex-statusline.py"'
+    assert sidebar_install.install_managed_hooks(command)
+    assert not sidebar_install.managed_hooks_need_sync(command)
+    assert not sidebar_install.install_managed_hooks(command)
+
+
+def test_codex_statusline_external_path_stays_absolute(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    executable = home / ".local" / "bin" / "python"
+    script = tmp_path / "external" / "codex-statusline.py"
+    monkeypatch.setattr(hooks, "CODEX_STATUSLINE_HOOK_PATH", str(script))
+    monkeypatch.setattr(hooks.sys, "executable", str(executable))
+    monkeypatch.setattr(sidebar_install.os.path, "expanduser", lambda value: str(home) if value == "~" else value)
+
+    assert hooks._codex_statusline_command() == f'"{executable}" "{script}"'
+
+
 def test_codex_statusline_version_roundtrip(tmp_path, monkeypatch):
     # _installed_codex_statusline_version 读回的版本应与写入的 STATUSLINE_HOOK_VERSION 一致，
     # 保证 needs_update 不会因解析偏差而误判。

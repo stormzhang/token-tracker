@@ -38,19 +38,24 @@ def _load_skill_resource(relative_path: str, package: str = _SKILL_PACKAGE) -> s
     return node.read_text(encoding="utf-8")
 
 
-def build_module_command(python: str, action: str) -> str:
-    """生成 Skill / Hook 共用的绝对解释器命令；不依赖 GUI Codex 的 PATH。"""
+def _portable_shell_path(path: str) -> str:
+    """将 HOME 内路径缩写为可安全展开的 shell 参数，其它路径保持绝对形式。"""
     if os.name == "nt":
-        python = python.replace("\\", "/")
-    else:
-        home = os.path.realpath(os.path.expanduser("~"))
-        executable = os.path.abspath(python)
-        if os.path.commonpath((home, executable)) == home:
-            relative = os.path.relpath(executable, home)
-            if all(char.isalnum() or char in "._-/" for char in relative):
-                return f'"$HOME/{relative}" -B -m token_tracker.sidebar_command {action}'
-            return f'"$HOME"/{shlex.quote(relative)} -B -m token_tracker.sidebar_command {action}'
-    return f'"{python}" -B -m token_tracker.sidebar_command {action}'
+        path = path.replace("\\", "/")
+        return f'"{path}"'
+    home = os.path.realpath(os.path.expanduser("~"))
+    absolute = os.path.abspath(path)
+    if os.path.commonpath((home, absolute)) != home:
+        return f'"{path}"'
+    relative = os.path.relpath(absolute, home)
+    if all(char.isalnum() or char in "._-/" for char in relative):
+        return f'"$HOME/{relative}"'
+    return f'"$HOME"/{shlex.quote(relative)}'
+
+
+def build_module_command(python: str, action: str) -> str:
+    """生成 Skill / Hook 共用的解释器命令；不依赖 GUI Codex 的 PATH。"""
+    return f'{_portable_shell_path(python)} -B -m token_tracker.sidebar_command {action}'
 
 
 def render_skill(relative_path: str, package: str = _SKILL_PACKAGE) -> str:
