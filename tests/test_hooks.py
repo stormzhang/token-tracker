@@ -866,6 +866,16 @@ def test_build_cc_command_unix_always_quoted(monkeypatch):
     assert "John Doe" in cmd  # 含空格路径被引号包住、能正确执行
 
 
+def test_build_kimi_command_windows_avoids_escaped_quotes(monkeypatch):
+    # issue #29：Kimi 用 cmd.exe spawn，内层双引号会被转义成字面量，默认无空格路径应裸传。
+    monkeypatch.setattr(hooks.os, "name", "nt")
+    cmd = hooks._build_kimi_command(
+        r"C:\Python311\python.exe",
+        r"C:\Users\X\.config\token-tracker\kimi-statusline.py",
+    )
+    assert cmd == "C:/Python311/python.exe C:/Users/X/.config/token-tracker/kimi-statusline.py"
+
+
 def test_cc_command_outdated_detects_legacy_format(monkeypatch):
     # 旧格式（裸拼接、无引号）应被检测为过时；新格式不动。
     monkeypatch.setattr(hooks.os, "name", "posix")
