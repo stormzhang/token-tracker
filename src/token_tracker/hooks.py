@@ -157,7 +157,7 @@ def _installed_kimi_statusline_version() -> str | None:
 
 
 def _kimi_statusline_command(python: str | None = None) -> str:
-    return _build_cc_command(python or sys.executable or "python3", KIMI_STATUSLINE_HOOK_PATH)
+    return _build_kimi_command(python or sys.executable or "python3", KIMI_STATUSLINE_HOOK_PATH)
 
 
 def kimi_statusline_active() -> bool:
@@ -344,6 +344,16 @@ def _build_cc_command(python: str, script: str) -> str:
     if os.name == "nt":
         python = python.replace("\\", "/")
         script = script.replace("\\", "/")
+    return f'"{python}" "{script}"'
+
+
+def _build_kimi_command(python: str, script: str) -> str:
+    """Avoid quotes that Kimi's Windows cmd.exe spawn escapes literally."""
+    if os.name == "nt":
+        python = python.replace("\\", "/")
+        script = script.replace("\\", "/")
+        if " " not in python and " " not in script:
+            return f"{python} {script}"
     return f'"{python}" "{script}"'
 
 
