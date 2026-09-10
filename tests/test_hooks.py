@@ -6,6 +6,7 @@ import subprocess
 import sys
 import time
 import tomllib
+from datetime import UTC, datetime
 
 import pytest
 
@@ -1658,3 +1659,152 @@ def test_ask_components_kimi_question(monkeypatch):
     assert asked[0][0].startswith("[1] ")
     assert c.kimi_statusline is False
     assert c.cc_statusline is True and c.codex_faux_statusline is True
+
+
+def _load_cc_statusline(tmp_path, name):
+    """把模板烘焙成脚本并作为独立模块载入（同 PR #20 两个用例的做法）。"""
+    import importlib.util
+    script = tmp_path / f"{name}.py"
+    script.write_text(hooks._render_hook_script(), encoding="utf-8")
+    spec = importlib.util.spec_from_file_location(f"_tt_scoped_{name}", script)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _limit_line(mod, data, now):
+    """跑一次 render，取出 Limit 行（保留 ANSI 与分隔线，只按去色文本定位）。"""
+    import contextlib
+    import io
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        mod.render(data, now)
+    for line in buf.getvalue().splitlines():
+        if mod.ANSI_RE.sub("", line).startswith("Limit:"):
+            return line
+    return ""
+
+
+def _write_cc_cache(config_dir, percent, resets_at, fetched_at_ms):
+    """伪造 Claude Code 的 /api/oauth/usage 缓存（<config dir>/.claude.json）。"""
+    config_dir.mkdir(parents=True, exist_ok=True)
+    (config_dir / ".claude.json").write_text(json.dumps({
+        "cachedUsageUtilization": {
+            "fetchedAtMs": fetched_at_ms,
+            "utilization": {"limits": [
+                {"kind": "session", "percent": 5, "scope": None},
+                {"kind": "weekly_all", "percent": 20, "scope": None},
+                {"kind": "weekly_scoped", "percent": percent, "resets_at": resets_at,
+                 "scope": {"model": {"id": None, "display_name": "Fable"}}},
+            ]},
+        }
+    }), encoding="utf-8")
+
+
+def test_scoped_quota_reads_claude_code_cache(tmp_path, monkeypatch):
+    # statusLine 的 payload 里没有按模型的周额度桶（只 spread five_hour/seven_day/spend_limit），
+    # 但 Claude Code 会把 /api/oauth/usage 的响应缓存到 <config dir>/.claude.json。读缓存即可，
+    # 不联网、不碰 OAuth token。config dir 由 transcript_path 逐级上溯定位。
+    mod = _load_cc_statusline(tmp_path, "quota")
+    cfg = tmp_path / ".claude"
+    _write_cc_cache(cfg, 42, "2026-09-08T22:59:59+00:00", 1788908000000)
+    data = {"transcript_path": str(cfg / "projects" / "proj" / "s.jsonl")}
+
+    label, pct, resets_at, stale = mod._scoped_quota(data, 1788908000)
+    assert (label, pct) == ("Fable", 42.0)
+    assert resets_at == int(datetime(2026, 9, 8, 22, 59, 59, tzinfo=UTC).timestamp())
+    assert stale is False
+
+    # fetchedAtMs 超过 1 小时 → 标记为陈旧（渲染时加 "~" 后缀）
+    _write_cc_cache(cfg, 42, "2026-09-08T22:59:59+00:00", 1788908000000 - 3601_000)
+    assert mod._scoped_quota(data, 1788908000)[3] is True
+
+    # 缓存损坏 / 不存在 → None，不抛异常（CC 高频写这个文件，可能读到写了一半）
+    (cfg / ".claude.json").write_text("{broken", encoding="utf-8")
+    assert mod._scoped_quota(data, 1788908000) is None
+
+    # 兜底路径是 ~/.claude —— HOME 必须重定向到空目录，否则用例会读到开发机上真实账号的
+    # 缓存，结果随机器而变（本地首跑就撞上了）
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path / "empty-home"))
+    assert mod._scoped_quota({"transcript_path": str(tmp_path / "nope" / "s.jsonl")},
+                             1788908000) is None
+
+
+def test_scoped_quota_config_dir_does_not_follow_symlinks(tmp_path, monkeypatch):
+    # projects/ 常被指向共享目录（多账号共用一份 transcript）。若解析 symlink，向上找会走出
+    # config dir 一路到 $HOME，命中旧版本遗留的 ~/.claude.json，读到错误账号的额度。
+    monkeypatch.setenv("HOME", str(tmp_path / "empty-home"))
+    mod = _load_cc_statusline(tmp_path, "symlink")
+    cfg = tmp_path / ".claude-b"
+    _write_cc_cache(cfg, 7, "2026-09-08T22:59:59+00:00", 1788908000000)
+    shared = tmp_path / "shared-projects"
+    (shared / "proj").mkdir(parents=True)
+    link = cfg / "projects"
+    try:
+        link.symlink_to(shared, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("平台不支持创建 symlink")
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+    data = {"transcript_path": str(link / "proj" / "s.jsonl")}
+    assert mod._claude_config_dir(data) == str(cfg)
+    assert mod._scoped_quota(data, 1788908000)[1] == 7.0
+
+
+def test_limit_line_groups_scoped_quota_with_seven_day(tmp_path, monkeypatch):
+    # 7d 与按模型的周额度是同一个周窗口：倒计时只打一次（打在后者），两者之间用细线，
+    # 与其余段的粗线形成区隔。没有该额度桶的账号则完全维持原来的 " | "，零视觉变化。
+    monkeypatch.setenv("HOME", str(tmp_path / "empty-home"))
+    mod = _load_cc_statusline(tmp_path, "line2")
+    cfg = tmp_path / ".claude-c"
+    now = datetime(2026, 9, 6, 0, 0, 0, tzinfo=UTC)
+    week_reset = "2026-09-08T22:59:59+00:00"
+    week_epoch = int(datetime(2026, 9, 8, 22, 59, 59, tzinfo=UTC).timestamp())
+    _write_cc_cache(cfg, 42, week_reset, int(now.timestamp() * 1000))
+    monkeypatch.setenv("COLUMNS", "200")
+    data = {
+        "transcript_path": str(cfg / "projects" / "proj" / "s.jsonl"),
+        "workspace": {"current_dir": str(tmp_path)},
+        "rate_limits": {"five_hour": {"used_percentage": 10,
+                                      "resets_at": int(now.timestamp()) + 3600},
+                        "seven_day": {"used_percentage": 20, "resets_at": week_epoch}},
+    }
+    line = _limit_line(mod, data, now)
+    assert "Fable:" in line
+    assert line.count("(") == 2  # 5h 一个倒计时 + 这一对共用的一个，而不是三个
+    assert "│" in line and "┃" in line  # 细线只在 7d 与 Fable 之间
+
+    # 窗口不同 → 各打各的倒计时，也就没有成组，分隔回到普通 " | "
+    data["rate_limits"]["seven_day"]["resets_at"] = week_epoch + 86400
+    line = _limit_line(mod, data, now)
+    assert line.count("(") == 3
+    assert "│" not in line and "┃" not in line
+
+    # 拿不到额度桶 → Limit 行与加此功能前逐字节一致
+    (cfg / ".claude.json").unlink()
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+    line = _limit_line(mod, data, now)
+    assert "Fable" not in line and "│" not in line and "┃" not in line
+    assert " | " in line
+
+
+def test_limit_line_drops_scoped_quota_on_narrow_terminal(tmp_path, monkeypatch):
+    # 窄终端优先保住 5h / 7d / Ctx：三档收窄后仍放不下就丢掉按模型的额度段。
+    monkeypatch.setenv("HOME", str(tmp_path / "empty-home"))
+    mod = _load_cc_statusline(tmp_path, "narrow")
+    cfg = tmp_path / ".claude-d"
+    now = datetime(2026, 9, 6, 0, 0, 0, tzinfo=UTC)
+    _write_cc_cache(cfg, 42, "2026-09-08T22:59:59+00:00", int(now.timestamp() * 1000))
+    data = {
+        "transcript_path": str(cfg / "projects" / "proj" / "s.jsonl"),
+        "workspace": {"current_dir": str(tmp_path)},
+        "rate_limits": {"five_hour": {"used_percentage": 10},
+                        "seven_day": {"used_percentage": 20}},
+        "context_window": {"used_percentage": 30, "context_window_size": 200000},
+    }
+    monkeypatch.setenv("COLUMNS", "200")
+    assert "Fable" in _limit_line(mod, data, now)
+    monkeypatch.setenv("COLUMNS", "40")
+    narrow = _limit_line(mod, data, now)
+    assert "Fable" not in narrow
+    assert "5h:" in narrow and "7d:" in narrow
