@@ -1658,3 +1658,94 @@ def test_ask_components_kimi_question(monkeypatch):
     assert asked[0][0].startswith("[1] ")
     assert c.kimi_statusline is False
     assert c.cc_statusline is True and c.codex_faux_statusline is True
+
+
+# --- HOOK_VERSION 2.2：网关清零 usage 时的 transcript 兜底 ---
+
+def _assistant_line(mid, usage, *, uuid="u1", ts="2026-01-01T00:00:00.000Z",
+                    content=None, request_id=None, sidechain=False):
+    """构造一行 CC transcript assistant 记录（content 按 CC 实际形态拆成多块多行）。"""
+    x = {"type": "assistant", "uuid": uuid, "timestamp": ts, "isSidechain": sidechain,
+         "message": {"id": mid, "usage": usage, "content": content or []}}
+    if request_id is not None:
+        x["requestId"] = request_id
+    return x
+
+
+def _write_transcript(path, lines):
+    path.write_text("\n".join(json.dumps(x, ensure_ascii=False) for x in lines) + "\n",
+                    encoding="utf-8")
+
+
+def _run_statusline_frame(tmp_path, data):
+    script = tmp_path / "tt-statusline.py"
+    script.write_text(hooks._render_hook_script(), encoding="utf-8")
+    env = dict(os.environ, HOME=str(tmp_path), COLUMNS="160")
+    return subprocess.run([sys.executable, str(script)], input=json.dumps(data),
+                          text=True, capture_output=True, env=env)
+
+
+def test_statusline_usage_zeroed_by_gateway_falls_back_to_transcript(tmp_path):
+    # 网关（GLM 等）从会话中段起把 input/cache 清零：CC 的 used_percentage 只看最后一条
+    # 响应 → 恒 0%。兜底链：CC 值 >0 时优先；为 0 时用 transcript 最近真实上报 + 锚点增量估算。
+    tpath = tmp_path / "session.jsonl"
+    real = {"input_tokens": 24000, "output_tokens": 100,
+            "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}
+    zeroed = {"input_tokens": 0, "output_tokens": 642,
+              "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}
+    _write_transcript(tpath, [
+        _assistant_line("m1", real, uuid="a1", content=[{"type": "text", "text": "x" * 3000}]),
+        _assistant_line("m2", zeroed, uuid="a2", content=[{"type": "text", "text": "y" * 3000}]),
+    ])
+    p = _run_statusline_frame(tmp_path, {
+        "session_id": "s1", "transcript_path": str(tpath),
+        "context_window": {"used_percentage": 0, "context_window_size": 200000,
+                           "total_input_tokens": 0, "total_output_tokens": 0, "current_usage": {}},
+    })
+    out = re.sub(r"\033\[[0-9;]*m", "", p.stdout)
+    assert p.returncode == 0
+    assert "0%" not in out.splitlines()[1]  # Ctx 不再显示 0%
+    assert "Ctx:" in out
+    # Tokens 行用最近真实上报兜底：out 显示被清零后仍在上报的 642
+    assert "out 642" in out
+    status = json.loads((tmp_path / ".config" / "token-tracker" / "tt-status.json").read_text())
+    assert status["_tx_cache"][str(tpath)]["data"]["est"] >= 24000  # 锚点 24000 + 增量
+
+
+def test_statusline_cc_values_take_priority_over_fallback(tmp_path):
+    # CC 官方值正常时一切照旧：used_percentage=42 不得被估算覆盖；cache 照常显示。
+    tpath = tmp_path / "session.jsonl"
+    _write_transcript(tpath, [
+        _assistant_line("m1", {"input_tokens": 24000, "output_tokens": 100,
+                               "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0},
+                        uuid="a1"),
+    ])
+    p = _run_statusline_frame(tmp_path, {
+        "session_id": "s2", "transcript_path": str(tpath),
+        "context_window": {"used_percentage": 42, "context_window_size": 1000000,
+                           "total_input_tokens": 3707, "total_output_tokens": 642,
+                           "current_usage": {"cache_read_input_tokens": 22016}},
+    })
+    out = re.sub(r"\033\[[0-9;]*m", "", p.stdout)
+    assert "42%" in out
+    assert "cache 22k" in out
+
+
+def test_statusline_total_dedupes_per_content_block(tmp_path):
+    # 回归：CC 把一条 assistant 消息按内容块拆成多行（usage 相同），旧 _read_transcript_totals
+    # 在"先去重再计 output"上没问题，但这里直接验证 2.2 的双去重（usage 按 id，字符按行 uuid）
+    # 不重复计 Total：两行同 id:requestId → 只算一次。
+    tpath = tmp_path / "session.jsonl"
+    usage = {"input_tokens": 5000, "output_tokens": 200,
+             "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}
+    _write_transcript(tpath, [
+        _assistant_line("m1", usage, uuid="a1", content=[{"type": "text", "text": "x"}]),
+        _assistant_line("m1", usage, uuid="a2", content=[{"type": "tool_use", "id": "t1",
+                                                          "name": "Bash", "input": {}}]),
+    ])
+    p = _run_statusline_frame(tmp_path, {
+        "session_id": "s3", "transcript_path": str(tpath),
+        "context_window": {"used_percentage": 0, "context_window_size": 200000},
+    })
+    out = re.sub(r"\033\[[0-9;]*m", "", p.stdout)
+    assert "Total: 5k" in out  # 5000 + 200 = 5200 → 5k；若重复计 output 会变 6k
