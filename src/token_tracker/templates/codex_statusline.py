@@ -200,7 +200,8 @@ def _git_status(cwd):
 
     def run(args):
         return subprocess.check_output(
-            ["git", *args], cwd=cwd, stderr=subprocess.DEVNULL, text=True, timeout=2,
+            ["git", *args], cwd=cwd, stderr=subprocess.DEVNULL,
+            encoding="utf-8", errors="replace", timeout=2,
         ).strip()
 
     try:
