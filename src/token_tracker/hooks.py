@@ -48,8 +48,11 @@ KIMI_STATUSLINE_STATE_PATH = os.path.join(_TT, "tt-kimi-statusline.json")
 KIMI_STATUSLINE_QUOTA_PATH = os.path.join(_TT, "tt-kimi-quota.json")
 STATUS_FILE = config.STATUS_FILE                          # CC statusline 缓存（单一权威定义在 config）
 TERMINAL_MAP_FILE = config.TERMINAL_MAP_FILE              # Codex Stop hook 采集的终端定位映射
-HOOK_VERSION = "2.1"  # 2.0: 采集 _terminal_map（sidebar 点击跳转）；2.1: 共享状态无条件随帧携带、防异常帧清表
-STATUSLINE_HOOK_VERSION = "1.9"  # 1.9: 缓存写入独立计价，快照缺失时使用相同的 token 拆分
+HOOK_VERSION = "2.2"  # 2.0: 采集 _terminal_map（sidebar 点击跳转）；2.1: 共享状态无条件随帧携带、防异常帧清表；
+                       # 2.2: git 相关 check_output 显式 encoding="utf-8"（中文系统 locale 编码非 UTF-8 时，
+                       # text=True 隐式按该 locale 解码 git 的 UTF-8 输出，中文分支名/文件名直接 UnicodeDecodeError）
+STATUSLINE_HOOK_VERSION = "2.0"  # 1.9: 缓存写入独立计价，快照缺失时使用相同的 token 拆分；
+                                 # 2.0: git check_output 显式 encoding="utf-8"，修中文分支名解码失败
 KIMI_STATUSLINE_HOOK_VERSION = "1.2"  # 1.2: Model 段加实际 effort（wire thinkingEffort），新增 Out t/s（output÷请求时长）
 
 CC_BACKUP_PATH = os.path.join(_TT, "cc-backup.json")

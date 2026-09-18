@@ -93,7 +93,7 @@ def git_branch(cwd):
     try:
         branch = subprocess.check_output(
             ["git", "branch", "--show-current"], cwd=cwd,
-            stderr=subprocess.DEVNULL, text=True, timeout=2,
+            stderr=subprocess.DEVNULL, encoding="utf-8", errors="replace", timeout=2,
         ).strip()
     except Exception:
         return ""
@@ -102,7 +102,7 @@ def git_branch(cwd):
     try:
         dirty = subprocess.check_output(
             ["git", "status", "--porcelain", "--untracked-files=no"], cwd=cwd,
-            stderr=subprocess.DEVNULL, text=True, timeout=2,
+            stderr=subprocess.DEVNULL, encoding="utf-8", errors="replace", timeout=2,
         ).strip()
         if dirty:
             branch += "*"
@@ -118,7 +118,7 @@ def git_diff_stat(cwd):
     try:
         out = subprocess.check_output(
             ["git", "diff", "HEAD", "--numstat"], cwd=cwd,
-            stderr=subprocess.DEVNULL, text=True, timeout=2,
+            stderr=subprocess.DEVNULL, encoding="utf-8", errors="replace", timeout=2,
         )
         for line in out.splitlines():
             parts = line.split("\t")
@@ -135,7 +135,7 @@ def git_diff_stat(cwd):
     try:
         out = subprocess.check_output(
             ["git", "ls-files", "--others", "--exclude-standard"], cwd=cwd,
-            stderr=subprocess.DEVNULL, text=True, timeout=2,
+            stderr=subprocess.DEVNULL, encoding="utf-8", errors="replace", timeout=2,
         )
         untracked = sum(1 for ln in out.splitlines() if ln.strip())
     except Exception:
