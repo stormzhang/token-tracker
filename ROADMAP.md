@@ -6,7 +6,7 @@
 
 最新发布记录为 2026-09-28 的 0.5.8，源码 f8e572c 与 tag 已推送，包含 Codex Hook 纯文本、新模型定价／命名空间及 Windows Kimi 命令兼容。发布包、隔离安装与 CI 已在该日核对；用户级工具未自动升级，Windows 真机限制沿用已有记录。
 
-2026-10-10 定价校准已在本地实现并验证，待发布：补 GPT-6.1 Sol、Claude Sonnet／Haiku 5.5、Mythos 5.1、GLM 5.2／5.3 各档、MiMo V2.6、Qwen Plus／Coder 与 Gemini Flash 离线价，修复 LiteLLM 阶梯表归零、MiniMax 长上下文／highspeed 错档、DeepSeek 2026 年节假日谷价；Gemini 已公告的 2027 年涨价按请求时间处理。详细口径与官方来源见[手册](docs/agent-handbook.md)，新回归见[定价更新测试](tests/test_pricing_updates.py)。
+2026-10-10 定价校准已实现并验证，0.5.9 版本与锁文件已同步，wheel／sdist、Twine 校验及隔离安装检查完成，正在发布：补 GPT-6.1 Sol、Claude Sonnet／Haiku 5.5、Mythos 5.1、GLM 5.2／5.3 各档、MiMo V2.6、Qwen Plus／Coder 与 Gemini Flash 离线价，修复 LiteLLM 阶梯表归零、MiniMax 长上下文／highspeed 错档、DeepSeek 2026 年节假日谷价；Gemini 已公告的 2027 年涨价按请求时间处理。详细口径与官方来源见[手册](docs/agent-handbook.md)，新回归见[定价更新测试](tests/test_pricing_updates.py)。
 
 已有报表、三 Agent 状态栏与 sidebar 能力见 [README.md](README.md)，技术事实和计价边界见 [手册](docs/agent-handbook.md)。报价是按已核对来源的估算，不以旧发布记录证明当前外部价格。历史版本以 Git／PyPI 发布记录为准，当前待办只保留下节未实现事项。
 
@@ -48,6 +48,7 @@
 
 ## 最近验证
 
+- 2026-10-10 19:33 0.5.9 发布准备：完整 pytest 与英文 dumb terminal pytest 独立串行各 564 passed，Ruff、mypy（41 个源文件）、锁文件与 diff 检查通过；wheel／sdist 通过 Twine 校验，44 个包文件与源码逐字节一致，未混入本地品牌素材、缓存或凭据；隔离 wheel 的版本、导入、两款 Skill、三份 Hook 模板编译与新模型报价检查通过。额外尝试不支持的 `--help` 时触发既有自动 Hook 更新，写入被沙箱拦截，后续仅运行只读检查；未升级用户级安装或修改 Hook 配置。GitHub／PyPI 远端结果待发布后核对。
 - 2026-10-10 17:12 定价更新验证：完整 pytest 与英文 dumb terminal pytest 各 564 passed，定价相关测试 236 passed；Ruff、mypy（41 个源文件）、锁文件与 diff 检查通过。最新 LiteLLM 表只读实取后校验 8 个新模型样例及 2 个 Qwen provider 阶梯样例，成本与预期一致且 Qwen 不再归零；离线旧缓存、缓存读写参与上下文阈值、逐请求 segment／不完整降级、历史模型精确价、节假日／调休周末与切价时刻均有回归。英文测试首次受沙箱 `ps` 限制，沙箱外复跑全过；未改用户级缓存、hooks 或安装。证据：[回归](tests/test_pricing_updates.py)。
 - 2026-10-03 10:08 文档检查：本项目受影响规范、文档引用、代码围栏、最近记录数量与时间顺序、Git diff 空白检查通过；全工作区 AGENTS 预算及 CLAUDE 兼容入口检查通过。入口：[项目规范](AGENTS.md)。本次未重跑历史业务验收。Markdown 渲染解析通过，Mermaid 示例未产生注释包裹的图源码。
 - 2026-09-28 14:42 0.5.8 发布与远端回验完成；完整 pytest、英文 dumb terminal pytest 独立串行各 456 passed，Ruff / mypy / 锁文件 / diff 检查通过；首次并发测试发生同名 FIFO 冲突，独立复跑两套均通过，未改测试或业务逻辑；Twine check、44 个包文件与发布提交逐字节检查通过，产物未混入品牌草稿或临时文件；远端 main 与 `v0.5.8` 均指向发布提交 `f8e572c`。证据：[GitHub CI](https://github.com/stormzhang/token-tracker/actions/runs/36387698193)。
@@ -67,4 +68,3 @@
 - 2026-08-24 21:06 Ghostty 分屏加前置探针，精确区分 Codex 沙箱与版本过低（已实现验证，未 commit / 未发版）；痛点：Codex 沙箱内整段 AppleScript 在编译期死于 -2741（读不到 Ghostty 术语字典），脚本内的运行时版本检查根本没机会执行，-2741 只能把「沙箱限制」与「版本低于 1.3.0」混报成一条文案；修复只动 `ghostty_split.py`：新增 `_probe_ghostty()`，跑整段脚本前先发最小探针 `tell application "Ghostty" to get version`（探针编译同样需加载字典，沙箱下同样 -2741）--2741 直接断定沙箱，提示「当前命令运行在 Codex 沙箱中，请以沙箱外权限（require_escalated）重跑 $tt-sidebar」；探针自身失败（osascript 缺失 / 超时）不阻断主流程，原 `_failure_message` 保留作运行时兜底；新增 6 用例（探针沙箱精确文案 / 精确版本号 / 达标放行 / 探针失败不阻断 / `_version_tuple` / 运行时兜底），替换原沙箱混报用例。
 - 2026-08-24 15:35 产品主页三版设计对比稿落盘（候选未定，`homepage.html` 仍为正式版）；基于同一质感层（JetBrains Mono webfont + 终端网格肌理 + spotlight 卡片 + 入场编排 + reduced-motion 全降级）产出：① `homepage-live.html` 活终端首屏 -- `uvx asciinema rec`（隔离环境，未全局安装）真实录制 `tt daily/weekly --mock`（110×32，mock 脱敏数据），cast 内联进页面经 Blob URL 喂给 asciinema-player，绕开 `file://` fetch 限制，双击即播。
 - 2026-08-24 14:48 产品主页预览落盘（`assets/brand/homepage.html`，静态预览、细节待主人单独优化）；按定稿品牌（方案 A `tt▌` 光标 + Mauve `#cba6f7`，Catppuccin Mocha 深色锁定）实现：非对称 hero（左文案右 `screenshot-daily.png` 真实截图）、三 Agent 支持徽章条（OpenAI logo CDN 已下架 404，弃用 logo 墙改终端风 mono 徽章）、statusline 截图区、7 格 bento 功能矩阵（4+2 / 2+2+2 / 3+3 节奏，侧边栏与主题两格嵌真实截图）、终端风安装命令块（curl 一键脚本 + `tt setup` + `tt daily`）、页脚 GitHub / PyPI / MIT 链接。证据：[homepage.html](assets/brand/homepage.html)。
-- 2026-08-24 14:38 品牌 logo 方案定稿落盘：方案 A（`tt▌` 光标）+ Mauve 紫；经 `preview.html` / `preview-v2.html` 双方案页对比，方案 B（`tt[0]` 像素计数窗）归档未采用（细节多、小尺寸略复杂）；主色对比 Blue / Green / Peach / Teal 后维持 Mauve，深浅底配对 `#cba6f7` / `#8839ef`（同色相，浅底加深保对比度，修正了预览页一度浅底误用 Blue `#1e66f5` 的跨色相问题）。证据：[README.md](assets/brand/README.md)。

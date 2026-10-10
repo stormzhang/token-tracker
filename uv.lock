@@ -402,7 +402,7 @@ wheels = [
 
 [[package]]
 name = "token-tracker"
-version = "0.5.8"
+version = "0.5.9"
 source = { editable = "." }
 dependencies = [
     { name = "questionary" },
