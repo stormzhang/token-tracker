@@ -4,9 +4,9 @@
 
 ## 当前状态
 
-最新发布记录为 2026-09-28 的 0.5.8，源码 f8e572c 与 tag 已推送，包含 Codex Hook 纯文本、新模型定价／命名空间及 Windows Kimi 命令兼容。发布包、隔离安装与 CI 已在该日核对；用户级工具未自动升级，Windows 真机限制沿用已有记录。
+最新发布为 2026-10-10 的 0.5.9，发布源码 `3dbbaba` 与 annotated tag `v0.5.9` 已推送，wheel／sdist 已发布 PyPI，包含最新模型定价与阶梯／时段计费修正。公开下载包 SHA-256、隔离安装及 Python 3.11／3.12 CI 已核对；用户级工具未自动升级，Windows 真机限制沿用已有记录。
 
-2026-10-10 定价校准已实现并验证，0.5.9 版本与锁文件已同步，wheel／sdist、Twine 校验及隔离安装检查完成，正在发布：补 GPT-6.1 Sol、Claude Sonnet／Haiku 5.5、Mythos 5.1、GLM 5.2／5.3 各档、MiMo V2.6、Qwen Plus／Coder 与 Gemini Flash 离线价，修复 LiteLLM 阶梯表归零、MiniMax 长上下文／highspeed 错档、DeepSeek 2026 年节假日谷价；Gemini 已公告的 2027 年涨价按请求时间处理。详细口径与官方来源见[手册](docs/agent-handbook.md)，新回归见[定价更新测试](tests/test_pricing_updates.py)。
+2026-10-10 定价校准已随 0.5.9 发布：补 GPT-6.1 Sol、Claude Sonnet／Haiku 5.5、Mythos 5.1、GLM 5.2／5.3 各档、MiMo V2.6、Qwen Plus／Coder 与 Gemini Flash 离线价，修复 LiteLLM 阶梯表归零、MiniMax 长上下文／highspeed 错档、DeepSeek 2026 年节假日谷价；Gemini 已公告的 2027 年涨价按请求时间处理。详细口径与官方来源见[手册](docs/agent-handbook.md)，新回归见[定价更新测试](tests/test_pricing_updates.py)。
 
 已有报表、三 Agent 状态栏与 sidebar 能力见 [README.md](README.md)，技术事实和计价边界见 [手册](docs/agent-handbook.md)。报价是按已核对来源的估算，不以旧发布记录证明当前外部价格。历史版本以 Git／PyPI 发布记录为准，当前待办只保留下节未实现事项。
 
@@ -33,7 +33,8 @@
 
 ## 最近完成
 
-- 2026-10-10 17:12 新模型定价与计价边界更新（已实现验证，待发布）：新增 19 个内置模型／快档／日期版报价并补齐相关报表短名，保留 Opus 5／5.5、Sonnet 5、Haiku 4.5、Mythos 5 等精确价；补 Haiku 100K、GPT-6.1 272K、MiniMax M3 512K、Qwen 32K／128K／256K 阶梯，兼容 LiteLLM `tiered_pricing`，DeepSeek 纳入 2026 年中秋／国庆谷价，Gemini 按请求时间切换已公告新价。证据：[实现](src/token_tracker/analyzer/cost.py)、[回归](tests/test_pricing_updates.py)、[官方依据与限制](docs/agent-handbook.md)。
+- 2026-10-10 19:35 `0.5.9` 已发布 PyPI，源码与 tag 已推送：版本及锁文件同步，发布 commit `3dbbaba` 与 annotated tag `v0.5.9` 已远端回验；两份公开产物元数据与下载字节 SHA-256 均与本地一致，PyPI 最新版本及 simple index 已确认。证据：[PyPI](https://pypi.org/project/token-tracker/0.5.9/)、[源码 tag](https://github.com/stormzhang/token-tracker/tree/v0.5.9)、[发布 CI](https://github.com/stormzhang/token-tracker/actions/runs/38048893649)。
+- 2026-10-10 17:12 新模型定价与计价边界更新已随 0.5.9 发布：新增 19 个内置模型／快档／日期版报价并补齐相关报表短名，保留 Opus 5／5.5、Sonnet 5、Haiku 4.5、Mythos 5 等精确价；补 Haiku 100K、GPT-6.1 272K、MiniMax M3 512K、Qwen 32K／128K／256K 阶梯，兼容 LiteLLM `tiered_pricing`，DeepSeek 纳入 2026 年中秋／国庆谷价，Gemini 按请求时间切换已公告新价。证据：[实现](src/token_tracker/analyzer/cost.py)、[回归](tests/test_pricing_updates.py)、[官方依据与限制](docs/agent-handbook.md)。
 - 2026-10-03 09:55 规范与进度文档精简：稳定边界保留于 AGENTS.md 与对应手册，ROADMAP 收敛当前状态及最近记录；本次未修改业务实现，未重跑历史运行验收。证据：[项目规范](AGENTS.md)。
 - 2026-09-28 14:42 `0.5.8` 已发布 PyPI（源码与 tag 已 push）：包含 Codex Hook 纯文本兼容、新模型定价与 GPT 命名空间识别，以及 Windows Kimi 状态栏命令修复；版本与锁文件、README 中英文已同步；发布 commit `f8e572c` 与 annotated tag `v0.5.8` 已推送；完整 pytest 与英文 dumb terminal pytest 各 456 passed，Ruff、mypy（41 个源文件）、锁文件与 diff 检查通过。证据：[GitHub CI](https://github.com/stormzhang/token-tracker/actions/runs/36387698193)。
 - 2026-09-26 18:25 Codex Hook ANSI 乱码兼容修复已随 0.5.8 发布：Codex 0.156.0 起过滤 Hook 消息中的控制字符，旧版彩色 `systemMessage` 的 ESC 被删除后留下 `[38；2；…m` 裸码（[上游变更](https://github.com/openai/codex/pull/46710)）；Codex 伪 statusline 改为两行纯文本，保留项目、token、成本、模型、额度与进度条；本地用户级脚本未覆盖。证据：[38;2;…m` 裸码（[上游变更](https://github.com/openai/codex/pull/46710)。
@@ -48,7 +49,7 @@
 
 ## 最近验证
 
-- 2026-10-10 19:33 0.5.9 发布准备：完整 pytest 与英文 dumb terminal pytest 独立串行各 564 passed，Ruff、mypy（41 个源文件）、锁文件与 diff 检查通过；wheel／sdist 通过 Twine 校验，44 个包文件与源码逐字节一致，未混入本地品牌素材、缓存或凭据；隔离 wheel 的版本、导入、两款 Skill、三份 Hook 模板编译与新模型报价检查通过。额外尝试不支持的 `--help` 时触发既有自动 Hook 更新，写入被沙箱拦截，后续仅运行只读检查；未升级用户级安装或修改 Hook 配置。GitHub／PyPI 远端结果待发布后核对。
+- 2026-10-10 19:35 0.5.9 发布验证：完整 pytest 与英文 dumb terminal pytest 独立串行各 564 passed，Ruff、mypy（41 个源文件）、锁文件与 diff 检查通过；wheel／sdist 通过 Twine 校验，44 个包文件与发布 tag 源码逐字节一致，未混入本地品牌素材、缓存或凭据；隔离 wheel 的版本、导入、两款 Skill、三份 Hook 模板编译与新模型报价检查通过。远端 main／tag、PyPI 两份文件元数据与下载 SHA-256、最新版本及 simple index 已核对，发布 CI 的 Python 3.11／3.12 全绿。额外尝试不支持的 `--help` 时触发既有自动 Hook 更新，写入被沙箱拦截，后续仅运行只读检查；未升级用户级安装或修改 Hook 配置。证据：[发布 CI](https://github.com/stormzhang/token-tracker/actions/runs/38048893649)。
 - 2026-10-10 17:12 定价更新验证：完整 pytest 与英文 dumb terminal pytest 各 564 passed，定价相关测试 236 passed；Ruff、mypy（41 个源文件）、锁文件与 diff 检查通过。最新 LiteLLM 表只读实取后校验 8 个新模型样例及 2 个 Qwen provider 阶梯样例，成本与预期一致且 Qwen 不再归零；离线旧缓存、缓存读写参与上下文阈值、逐请求 segment／不完整降级、历史模型精确价、节假日／调休周末与切价时刻均有回归。英文测试首次受沙箱 `ps` 限制，沙箱外复跑全过；未改用户级缓存、hooks 或安装。证据：[回归](tests/test_pricing_updates.py)。
 - 2026-10-03 10:08 文档检查：本项目受影响规范、文档引用、代码围栏、最近记录数量与时间顺序、Git diff 空白检查通过；全工作区 AGENTS 预算及 CLAUDE 兼容入口检查通过。入口：[项目规范](AGENTS.md)。本次未重跑历史业务验收。Markdown 渲染解析通过，Mermaid 示例未产生注释包裹的图源码。
 - 2026-09-28 14:42 0.5.8 发布与远端回验完成；完整 pytest、英文 dumb terminal pytest 独立串行各 456 passed，Ruff / mypy / 锁文件 / diff 检查通过；首次并发测试发生同名 FIFO 冲突，独立复跑两套均通过，未改测试或业务逻辑；Twine check、44 个包文件与发布提交逐字节检查通过，产物未混入品牌草稿或临时文件；远端 main 与 `v0.5.8` 均指向发布提交 `f8e572c`。证据：[GitHub CI](https://github.com/stormzhang/token-tracker/actions/runs/36387698193)。
