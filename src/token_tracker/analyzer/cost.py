@@ -1,11 +1,12 @@
 import http.client
 import json
+import math
 import os
 import ssl
 import sys
 import time
 import urllib.request
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta, timezone
 from pathlib import Path
 from urllib.error import URLError
 
@@ -25,10 +26,10 @@ _warned_insecure = False
 # codex- 兜底覆盖 Codex 内部虚拟 model（如 codex-auto-review，stop-time auto-review gate 用）
 _FAMILY_FALLBACK = (
     ("claude-opus", "claude-opus-5-5"),
-    ("claude-sonnet", "claude-sonnet-5"),
-    ("claude-haiku", "claude-haiku-4-5-20251001"),
+    ("claude-sonnet", "claude-sonnet-5-5"),
+    ("claude-haiku", "claude-haiku-5-5"),
     ("claude-fable", "claude-fable-5-1"),
-    ("claude-mythos", "claude-mythos-5"),
+    ("claude-mythos", "claude-mythos-5-1"),
     # GPT-5.6 三档并列（sol/terra/luna 各自有内置价，dated/variant 靠前缀命中）；系列内
     # 未知新档（如假想 gpt-5.6-nova）退回旗舰 sol——新档价未知时退回最贵档，宁可高估不低估
     ("gpt-5.6", "gpt-5.6-sol"),
@@ -38,7 +39,7 @@ _FAMILY_FALLBACK = (
     ("kimi-code/k3", "kimi-k3"),
     ("kimi", "kimi-k2.6"),
     ("moonshot-v", "moonshot-v1-128k"),
-    ("glm-5", "glm-5.1"),
+    ("glm-5", "glm-5.3"),
     ("glm-4", "glm-4.6"),
     ("qwen3-coder", "qwen3-coder-plus"),
     ("qwen3-max", "qwen-max"),
@@ -65,6 +66,16 @@ _OFFICIAL_PROVIDER_PREFIXES = (
 
 _DEEPSEEK_NEW_PRICING_AT = datetime(2026, 8, 16, 16, 0, tzinfo=UTC)
 _DEEPSEEK_V41_FLASH_AT = datetime(2026, 9, 10, 4, 0, tzinfo=UTC)
+_CHINA_TZ = timezone(timedelta(hours=8))
+# 2026 年国务院放假安排；峰谷价从 2026-08 生效，只需覆盖此后的中秋和国庆。
+# https://www.beijing.gov.cn/fuwu/bmfw/sy/jrts/202511/t20251104_4258838.html
+# 后续年份需在官方公布后补充，不能从农历节日或调休工作日猜测计费日历。
+_DEEPSEEK_HOLIDAYS = (
+    (date(2026, 9, 25), date(2026, 9, 27)),
+    (date(2026, 10, 1), date(2026, 10, 7)),
+)
+_GEMINI_FLASH_PRICE_CHANGE_AT = datetime(2027, 1, 1, tzinfo=UTC)
+_GEMINI_FLASH_MODELS = {"gemini-3.6-flash", "gemini-3.8-flash"}
 _DEEPSEEK_V41_FLASH_MODELS = {
     "deepseek-flash",
     "deepseek-v4-flash",
@@ -171,6 +182,14 @@ def _calculate_tokens(
 ) -> float:
     if model_key.lower() in _DEEPSEEK_V4_PRICING_KEYS:
         info = _deepseek_pricing(model, timestamp)
+    elif model_key in _GEMINI_FLASH_MODELS:
+        ts = timestamp if timestamp.tzinfo is not None else timestamp.replace(tzinfo=UTC)
+        # 官方公告的时间切价独立于当前缓存，历史请求不会被未来的在线价重算。
+        info = _usd(1.5, 7.5, 0.15) if ts >= _GEMINI_FLASH_PRICE_CHANGE_AT else _usd(0.75, 3.75, 0.075)
+
+    info = _select_tiered_pricing(info, prompt_tokens)
+    if "tiered_pricing" in info and ("input_cost_per_token" not in info or "output_cost_per_token" not in info):
+        _warn_unknown_model_once(model)
 
     suffix = _context_price_suffix(info, prompt_tokens)
     input_cost = _tier_value(info, "input_cost_per_token", suffix, 0)
@@ -186,6 +205,42 @@ def _calculate_tokens(
         + cache_creation_tokens * cache_creation_cost
         + cache_read_tokens * cache_read_cost
     )
+
+
+def _select_tiered_pricing(info: dict, prompt_tokens: int | None) -> dict:
+    """LiteLLM 的 range 是 (lower, upper]；无逐请求数据时用最低档，非法档不覆盖基础价。"""
+    tiers = info.get("tiered_pricing")
+    if not isinstance(tiers, list):
+        return info
+    valid: list[dict] = []
+    for tier in tiers:
+        if not isinstance(tier, dict):
+            continue
+        bounds = tier.get("range")
+        if not isinstance(bounds, (list, tuple)) or len(bounds) != 2:
+            continue
+        if not all(isinstance(n, (int, float)) and not isinstance(n, bool) for n in bounds):
+            continue
+        lower, upper = bounds
+        if not (math.isfinite(lower) and 0 <= lower < upper):
+            continue
+        rates = [tier.get(key) for key in ("input_cost_per_token", "output_cost_per_token")]
+        if not all(
+            isinstance(n, (int, float)) and not isinstance(n, bool) and math.isfinite(n) and n >= 0
+            for n in rates
+        ):
+            continue
+        valid.append(tier)
+    if not valid:
+        return info
+    valid.sort(key=lambda tier: tier["range"][0])
+    selected = valid[0]
+    if prompt_tokens is not None:
+        for tier in valid:
+            if prompt_tokens > tier["range"][0]:
+                selected = tier
+    # 返回该档覆盖后的价格，继续兼容已有的 *_above_*k_tokens 格式。
+    return {**info, **selected}
 
 
 def _context_price_suffix(info: dict, prompt_tokens: int | None) -> str:
@@ -226,7 +281,9 @@ def _deepseek_pricing(model: str, timestamp: datetime) -> dict:
         info["cache_creation_input_token_cost"] = info["input_cost_per_token"]
         return info
 
-    peak = ts.weekday() < 5 and (1 <= ts.hour < 4 or 6 <= ts.hour < 10)
+    china_date = ts.astimezone(_CHINA_TZ).date()
+    holiday = any(start <= china_date <= end for start, end in _DEEPSEEK_HOLIDAYS)
+    peak = not holiday and ts.weekday() < 5 and (1 <= ts.hour < 4 or 6 <= ts.hour < 10)
     if pro:
         info = _cny(9, 27, 0.3) if peak else _cny(4.5, 13.5, 0.15)
     elif ml in _DEEPSEEK_V41_FLASH_MODELS and ts >= _DEEPSEEK_V41_FLASH_AT:
@@ -258,6 +315,10 @@ def _resolve_model_key_uncached(model: str, pricing: dict) -> str | None:
         return model
 
     ml = model.lower()
+    # MiniMax 官方 ID 使用大小写混排；日志小写时也必须命中其精确档位。
+    for key in pricing:
+        if key.lower() == ml:
+            return key
     # model 以 key + "-" 为前缀：处理 dated/variant 后缀（gpt-5-codex-2025-12-01 → gpt-5-codex）
     # "-" 锚点避免 gpt-5 误吞 gpt-5.6-* 这类点号新版本；取最长匹配，避免 gpt-5 误吞 gpt-5-codex-*
     prefix_keys = [
@@ -431,6 +492,7 @@ def _fallback_pricing() -> dict:
         # Fable 5.1 仅缓存读取降至 $0.25/MTok；旧 Fable 5 / Mythos 5 保留原价。
         "claude-fable-5-1": {**_FABLE_PRICING, "cache_read_input_token_cost": 0.25e-6},
         "claude-fable-5": _FABLE_PRICING,
+        "claude-mythos-5-1": {**_FABLE_PRICING, "cache_read_input_token_cost": 0.25e-6},
         "claude-mythos-5": _FABLE_PRICING,
         # https://platform.claude.com/docs/en/models/opus-5-5/overview
         # Opus 5.5 降价；Opus 5 精确 key 保留历史价，不受系列兜底更新影响。
@@ -445,6 +507,19 @@ def _fallback_pricing() -> dict:
         "claude-opus-4-7": _OPUS_PRICING,
         "claude-opus-4-6": _OPUS_PRICING,
         "claude-opus-4-5": _OPUS_PRICING,
+        # https://platform.claude.com/docs/en/about-claude/pricing (2026-10-10)
+        "claude-sonnet-5-5": {
+            **_usd(2, 10, 0.1),
+            "cache_creation_input_token_cost": 2.5e-6,
+        },
+        "claude-haiku-5-5": {
+            **_usd(0.1, 0.5, 0.01),
+            "cache_creation_input_token_cost": 0.125e-6,
+            "input_cost_per_token_above_100k_tokens": 0.5e-6,
+            "output_cost_per_token_above_100k_tokens": 2.5e-6,
+            "cache_creation_input_token_cost_above_100k_tokens": 0.625e-6,
+            "cache_read_input_token_cost_above_100k_tokens": 0.05e-6,
+        },
         # Sonnet 5 的 $2/$10 导入价已于 2026-08-10 由 Anthropic 宣布转为永久价。
         "claude-sonnet-5": {
             "input_cost_per_token": 2e-6,
@@ -463,6 +538,15 @@ def _fallback_pricing() -> dict:
             "output_cost_per_token": 5e-6,
             "cache_creation_input_token_cost": 1.25e-6,
             "cache_read_input_token_cost": 0.1e-6,
+        },
+        # https://developers.openai.com/api/docs/models/gpt-6.1-sol
+        "gpt-6.1-sol": {
+            **_usd(2, 10, 0.1),
+            "cache_creation_input_token_cost": 2.5e-6,
+            "input_cost_per_token_above_272k_tokens": 4e-6,
+            "output_cost_per_token_above_272k_tokens": 15e-6,
+            "cache_creation_input_token_cost_above_272k_tokens": 5e-6,
+            "cache_read_input_token_cost_above_272k_tokens": 0.2e-6,
         },
         # https://developers.openai.com/api/docs/models/gpt-6-astra
         # Standard：超过 272K 输入，整次请求 input/cache 2x、output 1.5x。
@@ -583,8 +667,56 @@ def _fallback_pricing() -> dict:
         "glm-4.7": _usd(0.6, 2.2, 0.11),
         "glm-5": _usd(1.0, 3.2, 0.2),
         "glm-5.1": _usd(1.4, 4.4, 0.26),
+        # https://docs.z.ai/guides/overview/pricing
+        "glm-5.2": _usd(1.4, 4.4, 0.26),
+        "glm-5.3": _usd(1.4, 4.4, 0.26),
+        "glm-5.3-flash": _usd(0.15, 0.5, 0.03),
+        "glm-5.3-flashx": _usd(0.37, 1.25, 0.075),
         # 阿里 Qwen（中国站百炼人民币价，0-32K 基础档）
-        "qwen3-coder-plus": _cny(4, 16, 0.4),
+        # https://help.aliyun.com/zh/model-studio/model-pricing
+        # 新 Plus 隐式缓存按输入价的 20% 估算；显式缓存模式未在日志中区分。
+        "qwen3.7-plus": {
+            **_cny(1.6, 6.4, 0.32),  # 裸 alias 当前限时 8 折；日期版保留原价。
+            "input_cost_per_token_above_256k_tokens": 4.8 / _CNY_PER_USD * 1e-6,
+            "output_cost_per_token_above_256k_tokens": 19.2 / _CNY_PER_USD * 1e-6,
+            "cache_read_input_token_cost_above_256k_tokens": 0.96 / _CNY_PER_USD * 1e-6,
+        },
+        "qwen3.7-plus-2026-05-26": {
+            **_cny(2, 8, 0.4),
+            "input_cost_per_token_above_256k_tokens": 6 / _CNY_PER_USD * 1e-6,
+            "output_cost_per_token_above_256k_tokens": 24 / _CNY_PER_USD * 1e-6,
+            "cache_read_input_token_cost_above_256k_tokens": 1.2 / _CNY_PER_USD * 1e-6,
+        },
+        "qwen3.6-plus": {
+            **_cny(2, 12, 0.4),
+            "input_cost_per_token_above_256k_tokens": 8 / _CNY_PER_USD * 1e-6,
+            "output_cost_per_token_above_256k_tokens": 48 / _CNY_PER_USD * 1e-6,
+            "cache_read_input_token_cost_above_256k_tokens": 1.6 / _CNY_PER_USD * 1e-6,
+        },
+        "qwen3-coder-plus": {
+            **_cny(4, 16, 0.4),
+            "input_cost_per_token_above_32k_tokens": 6 / _CNY_PER_USD * 1e-6,
+            "output_cost_per_token_above_32k_tokens": 24 / _CNY_PER_USD * 1e-6,
+            "cache_read_input_token_cost_above_32k_tokens": 0.6 / _CNY_PER_USD * 1e-6,
+            "input_cost_per_token_above_128k_tokens": 10 / _CNY_PER_USD * 1e-6,
+            "output_cost_per_token_above_128k_tokens": 40 / _CNY_PER_USD * 1e-6,
+            "cache_read_input_token_cost_above_128k_tokens": 1 / _CNY_PER_USD * 1e-6,
+            "input_cost_per_token_above_256k_tokens": 20 / _CNY_PER_USD * 1e-6,
+            "output_cost_per_token_above_256k_tokens": 200 / _CNY_PER_USD * 1e-6,
+            "cache_read_input_token_cost_above_256k_tokens": 2 / _CNY_PER_USD * 1e-6,
+        },
+        "qwen3-coder-flash": {
+            **_cny(1, 4, 0.2),
+            "input_cost_per_token_above_32k_tokens": 1.5 / _CNY_PER_USD * 1e-6,
+            "output_cost_per_token_above_32k_tokens": 6 / _CNY_PER_USD * 1e-6,
+            "cache_read_input_token_cost_above_32k_tokens": 0.3 / _CNY_PER_USD * 1e-6,
+            "input_cost_per_token_above_128k_tokens": 2.5 / _CNY_PER_USD * 1e-6,
+            "output_cost_per_token_above_128k_tokens": 10 / _CNY_PER_USD * 1e-6,
+            "cache_read_input_token_cost_above_128k_tokens": 0.5 / _CNY_PER_USD * 1e-6,
+            "input_cost_per_token_above_256k_tokens": 5 / _CNY_PER_USD * 1e-6,
+            "output_cost_per_token_above_256k_tokens": 25 / _CNY_PER_USD * 1e-6,
+            "cache_read_input_token_cost_above_256k_tokens": 1 / _CNY_PER_USD * 1e-6,
+        },
         "qwen3-coder-next": {
             **_cny(1, 4),
             "input_cost_per_token_above_32k_tokens": 1.5 / _CNY_PER_USD * 1e-6,
@@ -621,12 +753,28 @@ def _fallback_pricing() -> dict:
         # MiniMax（官方 USD，与中国站÷7 自洽；M2/M2.1/M2.5 同价 legacy）
         "MiniMax-M2": _usd(0.3, 1.2, 0.03),
         "MiniMax-M2.1": _usd(0.3, 1.2, 0.03),
+        "MiniMax-M2.1-highspeed": {**_usd(0.6, 2.4, 0.03), "cache_creation_input_token_cost": 0.375e-6},
         "MiniMax-M2.5": _usd(0.3, 1.2, 0.03),
+        "MiniMax-M2.5-highspeed": {**_usd(0.6, 2.4, 0.03), "cache_creation_input_token_cost": 0.375e-6},
         "MiniMax-M2.7": _usd(0.3, 1.2, 0.06),
-        "MiniMax-M3": _usd(0.3, 1.2, 0.06),
+        "MiniMax-M2.7-highspeed": {**_usd(0.6, 2.4, 0.06), "cache_creation_input_token_cost": 0.375e-6},
+        # https://platform.minimax.io/docs/pricing/overview
+        "MiniMax-M3": {
+            **_usd(0.3, 1.2, 0.06),
+            "input_cost_per_token_above_512k_tokens": 0.6e-6,
+            "output_cost_per_token_above_512k_tokens": 2.4e-6,
+            "cache_read_input_token_cost_above_512k_tokens": 0.12e-6,
+        },
         # 小米 MiMo（mimo.mi.com 官方中国站人民币价；与 DeepSeek 同价，V2.5-Pro 主攻 agentic 编程）
         "mimo-v2.5-pro": _cny(3, 6, 0.025),
         "mimo-v2.5": _cny(1, 2, 0.02),
+        # https://mimo.mi.com/models/en-US/mimo-v2.6-pro
+        "mimo-v2.6-pro": _cny(3, 6, 0.025),
+        "mimo-v2.6-flash": _cny(1, 2, 0.02),
+        # https://ai.google.dev/gemini-api/docs/pricing
+        # 当前生效价；2027-01-01 翻倍按请求时间在 _calculate_tokens 中处理。
+        "gemini-3.6-flash": _usd(0.75, 3.75, 0.075),
+        "gemini-3.8-flash": _usd(0.75, 3.75, 0.075),
         # xAI Grok（docs.x.ai 官方 USD）。2026-05-15 退役潮：grok-4-fast/4.1-fast/grok-3 路由到 grok-4.3，
         # grok-code-fast-1 退役为 grok-build-0.1 别名（退役 slug 靠 _FAMILY_FALLBACK 接住）。
         "grok-4.3": {

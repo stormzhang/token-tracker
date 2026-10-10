@@ -406,9 +406,8 @@ def test_sonnet_5_cost_uses_permanent_price(monkeypatch):
     assert cost.calculate_cost(entry) == pytest.approx(12.0)
 
 
-def test_sonnet_family_fallback_points_to_sonnet_5(monkeypatch):
-    # 未来 sonnet 变体（如假想 claude-sonnet-5-1、claude-sonnet-6）系列兜底应指向 sonnet-5，
-    # 不再是过时的 sonnet-4-6；1M input → $2，而非 sonnet-4-6 的 $3。
+def test_sonnet_family_fallback_points_to_latest_sonnet(monkeypatch):
+    # 未来变体退回 Sonnet 5.5，旧 Sonnet 5 的精确报价独立保留。
     monkeypatch.setattr(cost, "_pricing", cost._fallback_pricing())
     entry = make_entry(model="claude-sonnet-6-20270101", input_tokens=1_000_000)
     assert cost.calculate_cost(entry) == pytest.approx(2.0)
@@ -535,8 +534,8 @@ def test_deepseek_old_price_and_qwen_cny_base_tier(monkeypatch):
     monkeypatch.setattr(cost, "_pricing", cost._fallback_pricing())
     ds = make_entry(model="deepseek-v4-flash", input_tokens=1_000_000, output_tokens=1_000_000)
     assert cost.calculate_cost(ds) == pytest.approx((1 + 2) / 7.1)
-    qw = make_entry(model="qwen3-coder-plus", input_tokens=1_000_000, output_tokens=1_000_000)
-    assert cost.calculate_cost(qw) == pytest.approx((4 + 16) / 7.1)
+    qw = make_entry(model="qwen3-coder-plus", input_tokens=32_000, output_tokens=1_000_000)
+    assert cost.calculate_cost(qw) == pytest.approx((32_000 * 4e-6 + 16) / 7.1)
 
 
 @pytest.mark.parametrize(
@@ -775,7 +774,7 @@ def test_bare_model_resolves_official_provider_key(monkeypatch, model, provider_
 
 
 def test_gemini_and_grok_short_names():
-    # Gemini 不入 cost.py（litellm 价已对），只验短名在 MODEL_SHORT；Grok 短名同验
+    # Gemini 3.6 / 3.8 Flash 已补离线价，此处统一检查报表短名。
     from token_tracker.ui.format import MODEL_SHORT
     for k in (
         "gemini-2.5-pro", "gemini-3-pro-preview", "gemini-3.5-flash",
