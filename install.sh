@@ -30,9 +30,15 @@ elif command -v python3 >/dev/null 2>&1 && python3 -m venv -h >/dev/null 2>&1; t
     VENV_DIR="$HOME/.local/share/token-tracker/venv"
     BIN_DIR="$HOME/.local/bin"
     python3 -m venv "$VENV_DIR"
-    "$VENV_DIR/bin/pip" install --upgrade "$PKG"
+    # Windows（Git Bash / MSYS2）下 venv 可执行目录是 Scripts/ 而非 bin/，
+    # 可执行文件带 .exe 后缀；按实际布局探测，Unix 行为不变。
+    VENV_BIN="$VENV_DIR/bin"
+    [ -d "$VENV_BIN" ] || VENV_BIN="$VENV_DIR/Scripts"
+    "$VENV_BIN/pip" install --upgrade "$PKG"
     mkdir -p "$BIN_DIR"
-    ln -sf "$VENV_DIR/bin/tt" "$BIN_DIR/tt"
+    TT_NAME="tt"
+    [ -f "$VENV_BIN/tt.exe" ] && TT_NAME="tt.exe"
+    ln -sf "$VENV_BIN/$TT_NAME" "$BIN_DIR/tt"
     TT_BIN="$BIN_DIR/tt"
 
 else
@@ -161,9 +167,11 @@ fi
 # 注册 fd 失败 OSError [Errno 22]）。改用：让 tt setup 看到 non-tty stdin →
 # 自动走 _auto_setup 默认全装（语言跟随系统 / mocha / 组件全开），不崩。
 # 想自定义的用户末尾会看到明确提示，去独立终端跑 `tt setup` 即可。
+# PYTHONUTF8=1：Windows GBK 控制台下 rich 输出 ✓ 等字符会
+# UnicodeEncodeError 导致 setup 崩溃，强制 UTF-8 模式规避（其他平台无影响）。
 say ""
 say "Configuring status bar..."
-"$TT_BIN" setup
+PYTHONUTF8=1 "$TT_BIN" setup
 
 say ""
 say "Done! Run 'tt' to start."
