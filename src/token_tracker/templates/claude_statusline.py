@@ -6,6 +6,13 @@ from datetime import datetime, timezone
 
 STATUS_FILE = os.path.join(os.path.expanduser("~/.config/token-tracker"), "tt-status.json")
 ANSI_RE = re.compile(r'\033\[[0-9;]*m')
+# Limit 行的分隔线分粗细：共用同一个重置窗口的相邻段之间用细线，其余用粗线。加入按模型的
+# 周额度后 Limit 行有了「7d 与该额度同属一个周窗口」这层结构，靠粗细区分才不会读成并列。
+# 两者可见宽度都与旧的 " | " 相同（3 列），窄终端的收窄判断无回归。
+SEP_LIMIT = " \033[2m\u2503\033[0m "
+SEP_LIMIT_GROUPED = " \033[2m\u2502\033[0m "
+# 缓存超过这个秒数就认为过期（与 Claude Code 自己判定 cachedUsageUtilization 的阈值一致）
+SCOPED_QUOTA_STALE_S = 3600
 # 配色在 tt setup / update_hook 烘焙时由 themes.theme_to_statusline_ansi(当前主题) 注入：
 # THEME_COLORS 为当前主题 truecolor，THEME_COLORS_256 为同主题的 256 色近似（兜底不支持
 # truecolor 的终端，如 macOS Terminal.app）。只认 COLORTERM=truecolor/24bit 走真彩，否则降 256。
@@ -227,6 +234,75 @@ def _read_transcript_totals(path):
     return inp, out, cache
 
 
+def _join_limit_segs(segs):
+    """segs: [(text, grouped_with_previous)]，grouped 的用细线接到前一段。
+    只有真的出现成组的相邻段时，其余分隔才升级为粗线——没有按模型额度可显示的用户
+    （拿不到 weekly_scoped 桶的账号）看到的仍是原来的 " | "，零视觉变化。"""
+    if not segs:
+        return ""
+    normal = SEP_LIMIT if any(grouped for _, grouped in segs[1:]) else " | "
+    out = segs[0][0]
+    for text, grouped in segs[1:]:
+        out += (SEP_LIMIT_GROUPED if grouped else normal) + text
+    return out
+
+
+def _claude_config_dir(data):
+    """定位当前账号的 Claude Code config dir。transcript_path 最可靠（它就在 config dir 下），
+    CLAUDE_CONFIG_DIR 与 ~/.claude 兜底。注意**不要**解析 symlink：projects/ 可能被指到共享
+    目录，解析后会走出 config dir 一路上溯到 $HOME，命中旧版本遗留的 ~/.claude.json。"""
+    home = os.path.expanduser("~")
+    transcript = data.get("transcript_path") or ""
+    if transcript:
+        d = os.path.dirname(os.path.abspath(transcript))
+        while d and d not in (home, os.path.dirname(home)):
+            if os.path.exists(os.path.join(d, ".claude.json")):
+                return d
+            parent = os.path.dirname(d)
+            if parent == d:
+                break
+            d = parent
+    return os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(home, ".claude")
+
+
+def _scoped_quota(data, now_ts):
+    """按模型计的周额度（当前是 Fable）。statusLine 的 payload 里没有这个桶——构造 payload 的
+    那段只 spread five_hour / seven_day / spend_limit。但 Claude Code 会把 /api/oauth/usage 的
+    响应缓存到 <config dir>/.claude.json，读缓存即可，不联网、不接触 OAuth token。
+    返回 (label, pct, resets_at, stale)，取不到则 None。"""
+    try:
+        with open(os.path.join(_claude_config_dir(data), ".claude.json"), encoding="utf-8") as f:
+            cached = json.load(f).get("cachedUsageUtilization") or {}
+    except (OSError, json.JSONDecodeError, ValueError, UnicodeDecodeError):
+        return None  # 文件不存在，或读到 CC 写了一半的内容——静默略过，不影响其余段
+    hit = None
+    for entry in ((cached.get("utilization") or {}).get("limits") or []):
+        if not isinstance(entry, dict) or entry.get("kind") != "weekly_scoped":
+            continue
+        if entry.get("percent") is None:
+            continue
+        name = ((entry.get("scope") or {}).get("model") or {}).get("display_name")
+        if name:
+            hit = (name, entry)
+            break
+    if hit is None:
+        return None
+    label, entry = hit
+
+    resets_at = None
+    raw = entry.get("resets_at")
+    if isinstance(raw, str) and raw:
+        try:
+            resets_at = int(datetime.fromisoformat(raw).timestamp())
+        except ValueError:
+            resets_at = None
+
+    fetched = cached.get("fetchedAtMs")
+    stale = (not isinstance(fetched, (int, float))
+             or (now_ts * 1000 - fetched) > SCOPED_QUOTA_STALE_S * 1000)
+    return label, float(entry["percent"]), resets_at, stale
+
+
 def render(data, now, tps=None):
     W = get_width()
     ctx = data.get("context_window") or {}
@@ -278,24 +354,48 @@ def render(data, now, tps=None):
     while len(line1) > 1 and vlen(" | ".join(line1)) > W:
         line1.pop()
 
-    # --- Line 2: Limit: 5h | 7d | Ctx ---
+    # --- Line 2: Limit: 5h ┃ 7d │ <model> ┃ Ctx（无按模型额度时退回 5h | 7d | Ctx）---
     rl = data.get("rate_limits") or {}
+    quota = _scoped_quota(data, now.timestamp())
+    seven = rl.get("seven_day") or {}
+
+    # 7d 与按模型的周额度是同一个周窗口，重置倒计时相同；重复打两遍纯属噪音，
+    # 只在这一对的后者上打一次。窗口真的不同（或缓存里没有 resets_at）时各打各的。
+    share_reset = False
+    if quota is not None and quota[2] is not None and seven.get("resets_at"):
+        share_reset = abs(int(seven["resets_at"]) - int(quota[2])) <= 120
+
+    def _limit_tiers(label, pct, resets_at, with_reset, suffix=""):
+        """一段的三档渲染：带倒计时 / 不带 / 只留百分数。"""
+        reset_str = ""
+        if with_reset and resets_at:
+            remain = int(resets_at) - int(now.timestamp())
+            if remain > 0:
+                reset_str = f" \033[2m{C['label']}({fmt_duration(remain)}){C['reset']}"
+        return (
+            f"{C['label']}{label}:{C['reset']}{progress_bar(pct, bar_w)}{suffix}{reset_str}",
+            f"{C['label']}{label}:{C['reset']}{progress_bar(pct, bar_w)}{suffix}",
+            f"{C['label']}{label}:{pct:.0f}%{suffix}{C['reset']}",
+        )
+
+    # (三档渲染, 是否与前一段共用重置窗口, 是否是按模型的额度段)
     rl_parts = []
     for key, label in [("five_hour", "5h"), ("seven_day", "7d")]:
         entry = rl.get(key) or {}
         pct = entry.get("used_percentage")
         if pct is not None:
-            reset_str = ""
-            resets_at = entry.get("resets_at")
-            if resets_at:
-                remain = int(resets_at) - int(now.timestamp())
-                if remain > 0:
-                    reset_str = f" \033[2m{C['label']}({fmt_duration(remain)}){C['reset']}"
             rl_parts.append((
-                f"{C['label']}{label}:{C['reset']}{progress_bar(pct, bar_w)}{reset_str}",
-                f"{C['label']}{label}:{C['reset']}{progress_bar(pct, bar_w)}",
-                f"{C['label']}{label}:{pct:.0f}%{C['reset']}",
+                _limit_tiers(label, pct, entry.get("resets_at"),
+                             not (key == "seven_day" and share_reset)),
+                False, False,
             ))
+    if quota is not None:
+        q_label, q_pct, q_reset, q_stale = quota
+        rl_parts.append((
+            _limit_tiers(q_label, q_pct, q_reset, True,
+                         f"\033[2m~{C['reset']}" if q_stale else ""),
+            share_reset, True,
+        ))
     ctx_parts = []
     if ctx.get("used_percentage") is not None:
         size = ctx.get("context_window_size", 0)
@@ -305,14 +405,17 @@ def render(data, now, tps=None):
         ]
     line2 = []
     if rl_parts or ctx_parts:
-        for idx in (0, 1, 2):
-            rl_seg = [p[idx] for p in rl_parts]
-            ctx_seg = (ctx_parts[:1] if idx < 2 else ctx_parts[1:2]) if ctx_parts else []
-            segs = rl_seg + ctx_seg
-            if rl_seg:
-                segs[0] = f"{C['label']}Limit:{C['reset']} {segs[0]}"
-            if idx == 2 or vlen(" | ".join(segs)) <= W:
-                line2 = segs
+        # 三档收窄；最后一档仍放不下时，丢掉按模型的额度段（5h / 7d / Ctx 优先保住）
+        for idx, drop_quota in ((0, False), (1, False), (2, False), (2, True)):
+            kept = [p for p in rl_parts if not (drop_quota and p[2])]
+            segs = [(tiers[idx], grouped) for tiers, grouped, _ in kept]
+            if ctx_parts:
+                segs.append((ctx_parts[0] if idx < 2 else ctx_parts[1], False))
+            if kept and segs:
+                segs[0] = (f"{C['label']}Limit:{C['reset']} {segs[0][0]}", segs[0][1])
+            joined = _join_limit_segs(segs)
+            if drop_quota or vlen(joined) <= W:
+                line2 = [joined] if joined else []
                 break
 
     # --- Line 3: Tokens（上下文窗口 in/out/cache 构成，非会话累计）| TPS ---
