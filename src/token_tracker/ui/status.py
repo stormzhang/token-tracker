@@ -13,6 +13,7 @@ from rich.rule import Rule
 from rich.table import Table
 from rich.text import Text
 
+from ..adapters.types import RateLimits, StatusSummary
 from ..i18n import t
 from ..tz import system_tz
 from .console import forced_color_console, get_console
@@ -86,19 +87,23 @@ def _render_summary(summary, agents: list[str], title: str, subtitle: str | None
     get_console().print()
 
 
-def _render_limits(rate_limits: dict, per_agent: dict) -> None:
+def _render_limits(rate_limits: dict[str | tuple[str, str], RateLimits], per_agent: dict[str, StatusSummary]) -> None:
     """订阅额度：每 agent 一段——头行（当天 Tokens / Cost / Model）+ 5h/7d 进度条。"""
     blocks: list = [Text("[Rate Limits]", style=f"bold {_S.good}")]
-    for i, (agent_id, rl) in enumerate(rate_limits.items()):
+    for i, (key, rl) in enumerate(rate_limits.items()):
+        agent_id, group = key if isinstance(key, tuple) else (key, "")
         if i:  # agent 块之间空一行，避免贴太紧
             blocks.append(Text(""))
         head = Text("  ")
         head.append(AGENT_LABEL.get(agent_id, agent_id), style=f"bold {_S.good}")
-        st = per_agent.get(agent_id)
-        head.append("    Tokens: ", style=_S.dim)
-        head.append(_fmt_tokens(st.total_tokens if st else 0), style=_S.token_bold)
-        head.append("  Cost: ", style=_S.dim)
-        head.append(_fmt_cost(st.cost_usd if st else 0.0), style=_S.good)
+        if group:
+            head.append(f" · {group}", style=_S.good)
+        else:
+            st = per_agent.get(agent_id)
+            head.append("    Tokens: ", style=_S.dim)
+            head.append(_fmt_tokens(st.total_tokens if st else 0), style=_S.token_bold)
+            head.append("  Cost: ", style=_S.dim)
+            head.append(_fmt_cost(st.cost_usd if st else 0.0), style=_S.good)
         if rl.model:
             head.append("  Model: ", style=_S.dim)
             head.append(_model_short(rl.model.split(" (")[0]), style=_S.cost)  # CC 名带 (1M context)，去括号
@@ -122,7 +127,8 @@ def _render_limits(rate_limits: dict, per_agent: dict) -> None:
                 reset_str = "reset --"
             else:
                 reset_str = f"reset at {datetime.fromtimestamp(resets, tz=system_tz()).strftime('%H:%M')}"
-            table.add_row(f"  {label}", f"{pct:.0f}%", _bar_text(pct / 100, _pct_style(pct)), reset_str)
+            pct_str = f"{pct:.1f}%" if group else f"{pct:.0f}%"
+            table.add_row(f"  {label}", pct_str, _bar_text(pct / 100, _pct_style(pct)), reset_str)
         blocks.append(table)
     get_console().print(Padding(Group(*blocks), (0, 0, 0, 2), expand=False))
     get_console().print()

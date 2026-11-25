@@ -6,6 +6,7 @@ import json
 import os
 import stat
 import sys
+import tempfile
 import tomllib
 from collections.abc import Callable
 from importlib import resources
@@ -67,23 +68,28 @@ def _write_text_atomic(path: str, content: str) -> None:
 
 
 def _write_json_atomic(path: str, data: dict) -> None:
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    temp = f"{path}.tmp-{os.getpid()}"
+    directory = os.path.dirname(path)
+    os.makedirs(directory, exist_ok=True)
+    temp = None
     try:
         mode = stat.S_IMODE(os.stat(path).st_mode)
     except FileNotFoundError:
         mode = 0o600
     try:
-        with open(temp, "w", encoding="utf-8") as f:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=directory, prefix=".tt-settings-", delete=False,
+        ) as f:
+            temp = f.name
             json.dump(data, f, indent=2, ensure_ascii=False)
             f.write("\n")
         os.chmod(temp, mode)
         os.replace(temp, path)
     finally:
-        try:
-            os.remove(temp)
-        except FileNotFoundError:
-            pass
+        if temp is not None:
+            try:
+                os.remove(temp)
+            except FileNotFoundError:
+                pass
 
 
 def _skill_managed(skill_dir: str) -> bool:

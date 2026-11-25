@@ -8,7 +8,7 @@
 
 2026-10-10 定价校准已随 0.5.9 发布：补 GPT-6.1 Sol、Claude Sonnet／Haiku 5.5、Mythos 5.1、GLM 5.2／5.3 各档、MiMo V2.6、Qwen Plus／Coder 与 Gemini Flash 离线价，修复 LiteLLM 阶梯表归零、MiniMax 长上下文／highspeed 错档、DeepSeek 2026 年节假日谷价；Gemini 已公告的 2027 年涨价按请求时间处理。详细口径与官方来源见[手册](docs/agent-handbook.md)，新回归见[定价更新测试](tests/test_pricing_updates.py)。
 
-已有报表、三 Agent 状态栏与 sidebar 能力见 [README.md](README.md)，技术事实和计价边界见 [手册](docs/agent-handbook.md)。报价是按已核对来源的估算，不以旧发布记录证明当前外部价格。历史版本以 Git／PyPI 发布记录为准，当前待办只保留下节未实现事项。
+已有报表、Agent 状态栏与 sidebar 能力见 [README.md](README.md)，技术事实和计价边界见 [手册](docs/agent-handbook.md)。报价是按已核对来源的估算，不以旧发布记录证明当前外部价格。历史版本以 Git／PyPI 发布记录为准，当前待办只保留下节未实现事项。
 
 ## 待办 / 计划
 
@@ -33,6 +33,8 @@
 
 ## 最近完成
 
+- 2026-11-25 Antigravity CLI 接入报表、Sidebar 和 `tt setup`。官方 statusline JSON 提供 Gemini 和 Claude／GPT 的 5 小时及周额度。已用真实 transcript 验证报表和 Sidebar，在 AGY 1.5.16、1.5.17 读取四个额度桶，在 1.5.17 验证状态栏和 `/usage` 面板。`tt setup --agy`、已安装命令和 `tt unsetup --agy` 已在隔离配置中验证。证据：[使用说明](README.md#antigravity-cli官方接口)、[回归测试](tests/test_agy.py)。
+- AGY 状态栏的 `5h`、`7d` 和 `Ctx` 进度条已对齐 Claude Code 的颜色档位、空格底色和百分比样式。已对比本机 Claude 状态栏的真彩和 256 色输出，并覆盖窄终端换行和 `NO_COLOR`。 [状态栏回归测试](tests/test_agy.py)
 - 2026-10-10 19:35 `0.5.9` 已发布 PyPI，源码与 tag 已推送：版本及锁文件同步，发布 commit `3dbbaba` 与 annotated tag `v0.5.9` 已远端回验；两份公开产物元数据与下载字节 SHA-256 均与本地一致，PyPI 最新版本及 simple index 已确认。证据：[PyPI](https://pypi.org/project/token-tracker/0.5.9/)、[源码 tag](https://github.com/stormzhang/token-tracker/tree/v0.5.9)、[发布 CI](https://github.com/stormzhang/token-tracker/actions/runs/38048893649)。
 - 2026-10-10 17:12 新模型定价与计价边界更新已随 0.5.9 发布：新增 19 个内置模型／快档／日期版报价并补齐相关报表短名，保留 Opus 5／5.5、Sonnet 5、Haiku 4.5、Mythos 5 等精确价；补 Haiku 100K、GPT-6.1 272K、MiniMax M3 512K、Qwen 32K／128K／256K 阶梯，兼容 LiteLLM `tiered_pricing`，DeepSeek 纳入 2026 年中秋／国庆谷价，Gemini 按请求时间切换已公告新价。证据：[实现](src/token_tracker/analyzer/cost.py)、[回归](tests/test_pricing_updates.py)、[官方依据与限制](docs/agent-handbook.md)。
 - 2026-10-03 09:55 规范与进度文档精简：稳定边界保留于 AGENTS.md 与对应手册，ROADMAP 收敛当前状态及最近记录；本次未修改业务实现，未重跑历史运行验收。证据：[项目规范](AGENTS.md)。

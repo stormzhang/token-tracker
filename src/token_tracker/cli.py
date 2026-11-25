@@ -6,10 +6,10 @@ from datetime import UTC, datetime, timedelta
 from rich.text import Text
 
 from . import config, i18n
-from .adapters import claude, codex, kimi
+from .adapters import agy, agy_quota, claude, codex, kimi
 from .adapters.rate_limits import load_rate_limits as load_claude_rate_limits
 from .adapters.registry import detect_agents
-from .adapters.types import StatusSummary
+from .adapters.types import RateLimits, StatusSummary
 from .analyzer.aggregator import (
     add_token_fields,
     aggregate_daily,
@@ -18,7 +18,7 @@ from .analyzer.aggregator import (
     aggregate_weekly,
 )
 from .analyzer.cost import calculate_cost
-from .hooks import is_setup, needs_update, setup, unsetup, update_hook
+from .hooks import configure_agy_statusline, is_setup, needs_update, setup, unsetup, update_hook
 from .i18n import t
 from .sidebar import registry_update_hint, scan_sessions
 from .tz import system_tz
@@ -32,7 +32,7 @@ from .ui.tables import (
     render_weekly,
 )
 
-AGENT_LOADERS = {"claude-code": claude, "codex": codex, "kimi": kimi}
+AGENT_LOADERS = {"claude-code": claude, "codex": codex, "kimi": kimi, "agy": agy}
 
 
 def _load_codex_rate_limits():
@@ -44,7 +44,7 @@ def _load_codex_rate_limits():
 RATE_LIMIT_LOADERS = {"claude-code": load_claude_rate_limits, "codex": _load_codex_rate_limits}
 
 # agent 过滤 flag → agent_id（issue #19；_extract_agent_arg 解析、_select_agents 反查共用）
-_FLAG_TO_ID = {"--claude": "claude-code", "--codex": "codex", "--kimi": "kimi"}
+_FLAG_TO_ID = {"--claude": "claude-code", "--codex": "codex", "--kimi": "kimi", "--agy": "agy"}
 
 # 排序字段 → stats 属性名（单一权威表）。
 # "time" 的属性因命令而异（daily=date / weekly=week / sessions=start_time），不在此表，走 default_attr。
@@ -88,7 +88,7 @@ def _parse_limit(args: list[str], default: int) -> int:
 
 
 def _extract_agent_arg(args: list[str]) -> tuple[list[str], str | None]:
-    """提取 `--claude` / `--codex` / `--kimi`，返回 (剩余 args, agent_id | None)。互斥（同时给报错退出）；
+    """提取互斥的 Agent 筛选参数，返回 (剩余 args, agent_id | None)。
     未给返回 None（走默认合并 + 会话自动识别）。用于多 agent 环境按需只看一个 agent（issue #19）。"""
     remaining: list[str] = []
     agent_id: str | None = None
@@ -219,7 +219,7 @@ def _build_status_data(agents) -> dict | None:
     summary = StatusSummary()
     per_agent: dict = {}
     sessions = []
-    rate_limits: dict = {}
+    rate_limits: dict[str | tuple[str, str], RateLimits] = {}
     for a in agents:
         # 当天 entries：load 过去 25h（覆盖当天最长 + 时区缓冲）后按系统时区今天过滤
         entries = [e for e in _load_entries(a.id, hours_back=25)
@@ -238,10 +238,12 @@ def _build_status_data(agents) -> dict | None:
         a_sum.session_count = len(a_sessions)
         per_agent[a.id] = a_sum
         sessions.extend(a_sessions)
+        if a.id == "agy":
+            rate_limits.update({(a.id, group): limits for group, limits in agy_quota.load_rate_limits().items()})
         rl = RATE_LIMIT_LOADERS.get(a.id, lambda: None)()
         if rl and (rl.five_hour_pct is not None or rl.seven_day_pct is not None):
             rate_limits[a.id] = rl
-    if not sessions and summary.total_tokens == 0:
+    if not sessions and summary.total_tokens == 0 and not any(isinstance(key, tuple) for key in rate_limits):
         return None
     summary.session_count = len(sessions)
     sessions.sort(key=lambda s: s.cost_usd, reverse=True)
@@ -270,7 +272,7 @@ def _cmd_sidebar(agents, args: list[str]) -> None:
     （备用屏 + 滚动 + 5s 定时刷新，q / Ctrl+C 退出）；`--once` 或非 tty 打一帧
     Rich 快照即退（脚本 / `!tt sidebar` / 测试用）。只读 transcript 与心跳文件，
     不写任何产物；不跟随会话收窄 agent——侧边栏本职是「总览所有会话」，
-    显式 --claude / --codex / --kimi 才过滤。"""
+    显式指定 Agent 参数才过滤。"""
     agent_ids = {a.id for a in agents}
     if "--once" in args or not sys.stdout.isatty():
         sessions = scan_sessions(agent_ids=agent_ids)
@@ -341,12 +343,15 @@ def _run_setup_flow() -> None:
     """配置流程**单一入口**：先确认装了至少一个 agent（detect_agents 守卫只此一处），
     再按环境分流——双 tty 非会话内进交互向导，否则非交互默认全装。
     `tt setup` 与首次运行「没配过」时都走这里。"""
-    if not detect_agents():
+    agents = detect_agents()
+    if not agents:
         get_console().print(f"[red]{t('no_agent_install')}[/red]")
         return
     if _should_run_wizard():
         from .wizard import run_wizard
         run_wizard()  # wizard 欢迎行下会显示检测到的 agent
+    elif {agent.id for agent in agents} == {"agy"}:
+        get_console().print(t("agy_setup_hint"))
     else:
         _auto_setup()
 
@@ -475,7 +480,7 @@ def _apply_theme_override(name: str | None) -> None:
     theme.set_active_theme(name)
 
 
-def _handle_non_data_command(command: str, args: list[str]) -> bool:
+def _handle_non_data_command(command: str, args: list[str], agent_id: str | None) -> bool:
     """处理不需要 Agent 数据的命令；已处理返回 True。"""
     if command in ("--version", "-v", "-V"):
         print(f"token-tracker {_get_version()}")
@@ -483,6 +488,9 @@ def _handle_non_data_command(command: str, args: list[str]) -> bool:
         return True
     if command == "theme":
         cmd_theme(args)
+        return True
+    if agent_id == "agy" and command in {"setup", "unsetup"}:
+        configure_agy_statusline(command == "setup")
         return True
     if command == "setup":
         _run_setup_flow()
@@ -579,6 +587,11 @@ def _render_session_report(stats, sort_key: str | None,
 
 
 def main():
+    if sys.argv[1:] == ["agy-statusline"]:
+        from .templates.agy_statusline import main as agy_statusline
+        agy_statusline()
+        return
+
     # --mock：本地开发演示，加载 mock/ 假数据再走正常报表流程（mock/ 在 .gitignore）
     if "--mock" in sys.argv:
         sys.argv = [a for a in sys.argv if a != "--mock"]
@@ -592,11 +605,12 @@ def main():
     _apply_theme_override(theme_override)
     command = args[0] if args else "daily"
 
-    if _handle_non_data_command(command, args[1:]):
+    if _handle_non_data_command(command, args[1:], filter_agent):
         return
 
-    _ensure_data_ready()
     agents = _select_agents(filter_agent)
+    if {agent.id for agent in agents} != {"agy"}:
+        _ensure_data_ready()
 
     if command in ("status", "dashboard"):
         data = _build_status_data(agents)

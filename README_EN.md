@@ -1,6 +1,6 @@
 # Token Tracker
 
-Track token usage across local AI agents. Supports **Claude Code**, **Codex**, and **Kimi Code**.
+Track token usage across local AI agents. Supports **Claude Code**, **Codex**, **Kimi Code**, and **Antigravity CLI (AGY)**.
 
 Custom StatusLine integration + CLI Dashboard — see token usage, cost, and rate limits at a glance.
 
@@ -12,7 +12,7 @@ Custom StatusLine integration + CLI Dashboard — see token usage, cost, and rat
 
 ## Highlights
 
-- **Unified multi-agent tracking** — Claude Code + Codex + Kimi Code in one place, grouped by source
+- **Unified multi-agent tracking** — Claude Code, Codex, Kimi Code, and AGY in one place, grouped by source
 - **Status line integration** -- Claude Code via the official StatusLine API; Codex via a Stop hook that appends two lines of plain-text usage status; Kimi Code via the official `status_line` API
 - **Live sidebar** — `tt sidebar` shows all active sessions (Claude Code + Codex + Kimi Code); `$tt-sidebar` in Codex or `/skill:tt-sidebar` in Kimi Code opens a current-session-only pane on the right at one-third width
 - **Rate limit monitoring** — real-time 5h / 7d quota usage with reset countdown
@@ -25,7 +25,7 @@ Custom StatusLine integration + CLI Dashboard — see token usage, cost, and rat
 
 ## StatusLine
 
-`tt setup` auto-configures status lines for Claude Code, Codex, and Kimi Code, auto-upgraded when the script updates.
+`tt setup` configures status lines for Claude Code, Codex, and Kimi Code and updates their scripts automatically. The interactive wizard also offers the Antigravity CLI status line.
 
 ### Claude Code (official API)
 
@@ -81,6 +81,18 @@ Built on Kimi Code's official `status_line` API (`tui.toml`) — a single trueco
 - Project / branch / model / permission mode come from Kimi's official snapshot (the snapshot has no thinking-effort field — effort is read from the actual `thinkingEffort` of requests in the session wire); the branch segment's uncommitted +/− line counts and untracked files are computed via `git diff --numstat` + `git ls-files` (same as the CC status line); Total and Cost are accumulated **incrementally** from the session's `wire.jsonl` by the status-line script (offset-cached, only new bytes are read per run), priced with the built-in official Kimi rates
 - Fully supported on macOS / Linux / Windows (Windows console GBK encoding and background-process detaching are both handled)
 - An existing custom `status_line.command` is never overwritten by default (the wizard also lets you opt out); `tt unsetup` restores the exact prior state
+
+### Antigravity CLI (official API)
+
+Reports and the sidebar read local sessions directly. Try `tt daily --agy` or `tt sidebar --agy`. The sidebar shows AGY prompts and recent activity. Pane jumping and automatic session splitting are available through other agent integrations. Enable the live status line in the `tt setup` wizard, or configure AGY on its own:
+
+```bash
+tt setup --agy
+```
+
+Reopen AGY to apply the change. `tt setup --agy` configures only AGY and preserves unrelated settings and existing custom statusline commands. `tt unsetup --agy` restores the previous AGY statusline settings.
+
+The status line shows session input and output tokens. Context utilization and five-hour and weekly usage for Gemini and Claude/GPT use the same progress bar palette and thresholds as the Claude Code status line. It caches only quota fields. `tt status --agy` shows snapshots up to 15 minutes old and hides buckets whose reset has passed until AGY supplies fresh data. Run `/usage` in AGY to refresh and cross-check. Report costs use Token Tracker's model-price estimates. Google reports actual AGY charges and AI credit balances. See [Google's status line documentation](https://antigravity.google/docs/cli/statusline/).
 
 ## Live Sidebar
 
@@ -142,7 +154,7 @@ tt unsetup        # uninstall and restore previous config
 tt --version      # show version (-v / -V)
 ```
 
-> In multi-agent setups, add `--claude` / `--codex` / `--kimi` (mutually exclusive) to filter any report to a single agent — works for `status` / `daily` / `weekly` / `monthly` / `sessions`. E.g. `tt daily --kimi` renders only the Kimi Code heatmap. Inside an agent session, `daily` / `weekly` already auto-follow the current agent; the explicit flag overrides that.
+> Add `--claude`, `--codex`, `--kimi`, or `--agy` (mutually exclusive) to filter `status`, `daily`, `weekly`, `monthly`, `sessions`, or `sidebar` to one agent. For example, `tt daily --agy` shows Antigravity CLI usage. The explicit flag overrides session auto-detection in `daily` and `weekly`.
 
 > 💡 `tt daily` is a GitHub-style token contribution heatmap (shaded green cells). In a Claude Code session, type `!tt daily` to see it in full color — commands you run yourself with `!` have their 24-bit true-color output rendered.
 
@@ -201,6 +213,7 @@ Available sort fields: `tokens` / `cost` / `messages` / `time` / `input` / `outp
 | Claude Code | `~/.claude/projects/*/` | JSONL (per-message usage) |
 | Codex | `~/.codex/sessions/` | JSONL + SQLite |
 | Kimi Code | `~/.kimi-code/sessions/` | wire JSONL (per-turn increments) |
+| Antigravity CLI | `~/.gemini/antigravity-cli/` | Transcript JSONL (per-request usage) and SQLite (project paths) |
 
 Cross-platform paths: on Windows `~` resolves to `%USERPROFILE%`. Honors `CLAUDE_CONFIG_DIR` / `CODEX_HOME` / `KIMI_CODE_HOME` (the official custom-directory env vars) when set.
 

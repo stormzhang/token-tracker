@@ -266,6 +266,7 @@ def test_detect_lang_prefers_config_over_env(tmp_path, monkeypatch):
 def test_run_wizard_saves_theme(tmp_path, monkeypatch):
     # wizard 用 questionary 交互：mock select 直接返回值（避免起 prompt_toolkit 主循环）。
     from token_tracker import i18n, wizard
+    from token_tracker.adapters import agy
 
     class _FakeQ:
         def __init__(self, value):
@@ -279,17 +280,19 @@ def test_run_wizard_saves_theme(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "_LEGACY_THEME_PATH", str(tmp_path / "theme.json"))
     monkeypatch.setattr(config, "_LEGACY_LANG_PATH", str(tmp_path / "lang.json"))
 
-    # 顺序：选语言（zh）→ 选主题（nord）→ 增强项 Yes/No（按检测到的 agent 数量）
-    # has_cc / has_codex / has_kimi 固定，问题数稳定；多余 mock 序列不会被消耗。
+    # 语言、主题、Claude Code、Codex、AGY。固定检测结果，避免依赖本机安装。
     monkeypatch.setattr(wizard, "_has_cc", lambda: True)
     monkeypatch.setattr(wizard, "_has_codex", lambda: True)
     monkeypatch.setattr(wizard, "_has_kimi", lambda: False)
-    selects = iter(["zh", "nord", "Yes", "Yes"])
+    monkeypatch.setattr(agy, "AGY_HOME", tmp_path)
+    selects = iter(["zh", "nord", "Yes", "Yes", "Yes"])
     monkeypatch.setattr("questionary.select", lambda *a, **k: _FakeQ(next(selects)))
-    monkeypatch.setattr(wizard, "setup", lambda **kw: None)  # 不真落地配置
+    applied = []
+    monkeypatch.setattr(wizard, "setup", lambda **kw: applied.append(kw["components"]))
     monkeypatch.delenv("TT_THEME", raising=False)
     monkeypatch.setattr(theme, "_ACTIVE_NAME", None)
     wizard.run_wizard()
     assert config.load_config()["theme"] == "nord"
     assert config.load_config()["lang"] == "zh"  # 语言也被保存
     assert i18n.LANG == "zh"  # i18n 即时切换
+    assert applied[0].agy_statusline is True

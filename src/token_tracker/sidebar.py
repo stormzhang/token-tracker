@@ -28,6 +28,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from . import config
+from .adapters import agy as agy_adapter
 from .adapters import claude as claude_adapter
 from .adapters import codex as codex_adapter
 from .adapters.util import (
@@ -172,6 +173,8 @@ def scan_sessions(hours_back: int = DEFAULT_HOURS_BACK,
         sessions.extend(_scan_codex_sessions(cutoff, now, heartbeat, max_prompts, term_map=term_map))
     if agent_ids is None or "kimi" in agent_ids:
         sessions.extend(_scan_kimi_sessions(cutoff, now, heartbeat, max_prompts, term_map=term_map))
+    if agent_ids is None or "agy" in agent_ids:
+        sessions.extend(_scan_agy_sessions(cutoff, now, max_prompts))
     sessions.sort(key=lambda s: s.last_activity, reverse=True)
     return sessions[:max_sessions]
 
@@ -716,6 +719,50 @@ def _scan_kimi_sessions(cutoff: datetime, now: datetime,
             next_hint=parsed.next_hint,
         ))
     return sessions
+
+
+def _scan_agy_sessions(cutoff: datetime, now: datetime, max_prompts: int | None) -> list[LiveSession]:
+    projects = agy_adapter.load_projects()
+    sessions: list[LiveSession] = []
+    for path in agy_adapter.transcripts():
+        mtime, stamp, parsed = _cache_get(path, max_prompts)
+        if not mtime or mtime < cutoff.timestamp():
+            continue
+        if parsed is None:
+            parsed = _parse_agy(path, max_prompts)
+            if stamp is not None:
+                _cache_put(path, max_prompts, parsed, stamp)
+        if not parsed.prompts or parsed.last_event is None or parsed.last_event < cutoff:
+            continue
+        sessions.append(LiveSession(
+            agent_id="agy", session_id=parsed.session_id,
+            project=projects.get(parsed.session_id, "unknown"),
+            last_activity=parsed.last_event, state=_infer_state(now, parsed.last_event, False, False),
+            prompts=parsed.prompts, model=parsed.model,
+        ))
+    return sessions
+
+
+def _parse_agy(path: Path, max_prompts: int | None) -> _Parsed:
+    parsed = _Parsed(session_id=path.parents[2].name, project="", prompts=[], pending_tool=False)
+    for row in iter_jsonl_dicts(path):
+        kind = row.get("type")
+        timestamp = agy_adapter.parse_timestamp(row.get("created_at"))
+        if timestamp is None or kind not in ("USER_INPUT", "PLANNER_RESPONSE", "GENERIC"):
+            continue
+        if parsed.last_event is None or parsed.last_event <= timestamp:
+            parsed.last_event = timestamp
+        if kind == "USER_INPUT" and row.get("source") == "USER_EXPLICIT":
+            text = row.get("content")
+            if isinstance(text, str) and text.strip():
+                parsed.prompts.append(Prompt(text.strip(), timestamp))
+        elif kind == "PLANNER_RESPONSE":
+            model = row.get("model")
+            if isinstance(model, str) and model:
+                parsed.model = model
+    if max_prompts is not None and max_prompts > 0:
+        parsed.prompts = parsed.prompts[-max_prompts:]
+    return parsed
 
 
 def _parse_kimi(path: Path, max_prompts: int | None) -> _Parsed | None:

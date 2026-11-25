@@ -16,7 +16,8 @@ from prompt_toolkit.styles import Style
 from questionary.prompts import common as _q_common
 
 from . import config, i18n
-from .hooks import CLAUDE_SETTINGS, CODEX_DIR, SetupComponents, recommended_components, setup
+from .adapters import agy
+from .hooks import CLAUDE_SETTINGS, CODEX_DIR, SetupComponents, agy_statusline_active, recommended_components, setup
 from .i18n import t
 from .ui import themes
 from .ui.console import get_console
@@ -210,7 +211,13 @@ def ask_components(step_prefix_fn: Callable[[int], str] | None = None) -> SetupC
         kimi = _ask_yes_no(f"{prefix(qi)}{t('wizard_q_kimi_statusline')}", default=kimi)
         qi += 1
 
-    return SetupComponents(cc_statusline=cc, codex_faux_statusline=codex_faux, kimi_statusline=kimi)
+    agy_enabled = None
+    if agy.detect() is not None:
+        agy_enabled = _ask_yes_no(f"{prefix(qi)}{t('wizard_q_agy_statusline')}", default=agy_statusline_active())
+
+    return SetupComponents(
+        cc_statusline=cc, codex_faux_statusline=codex_faux, kimi_statusline=kimi, agy_statusline=agy_enabled,
+    )
 
 
 def _print_summary(console, choice: str, components: SetupComponents) -> None:
@@ -235,6 +242,9 @@ def _print_summary(console, choice: str, components: SetupComponents) -> None:
         # 双因素（意图 AND 文件实装）；_setup_kimi_statusline 已写入意图，此处直接查 active
         state = f"[{green}]✓[/{green}]" if kimi_statusline_active() else f"[{dim}]✗[/{dim}]"
         rows.append((t("wizard_summary_kimi_statusline"), state))
+    if agy.detect() is not None:
+        state = f"[{green}]✓[/{green}]" if agy_statusline_active() else f"[{dim}]✗[/{dim}]"
+        rows.append((t("wizard_summary_agy_statusline"), state))
     key_w = max(_disp_width(k) for k, _ in rows)
 
     console.print()
@@ -257,7 +267,7 @@ def run_wizard() -> None:
     console = get_console()
 
     # 总步数：语言 + 主题 + 增强项问题数（按检测到的 agent 决定）
-    enhancement_q = (1 if _has_cc() else 0) + (1 if _has_codex() else 0) + (1 if _has_kimi() else 0)
+    enhancement_q = sum((_has_cc(), _has_codex(), _has_kimi(), agy.detect() is not None))
     total = 2 + enhancement_q
 
     # 欢迎行（品牌 + 版本，缩进 2）固定英文不随语言；署名移到末尾 sign-off 行；下一行显示检测到的 agent

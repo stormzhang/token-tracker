@@ -1,6 +1,6 @@
 # Token Tracker (tt)
 
-本地 AI Agent Token 消耗追踪/分析工具，支持 **Claude Code**、**Codex** 和 **Kimi Code**。
+本地 AI Agent Token 消耗追踪／分析工具，支持 **Claude Code**、**Codex**、**Kimi Code** 和 **Antigravity CLI（AGY）**。
 
 自定义 StatusLine 状态栏 + CLI Dashboard，实时查看 token 用量、等效成本、限额状态。
 
@@ -12,7 +12,7 @@
 
 ## 功能亮点
 
-- **多 Agent 统一追踪** — Claude Code + Codex + Kimi Code 统一读取，多 Agent 按来源分组
+- **多 Agent 统一追踪** — Claude Code + Codex + Kimi Code + AGY 统一读取，多 Agent 按来源分组
 - **状态栏集成** -- Claude Code 用官方 StatusLine 接口；Codex 用 Stop hook 在回答后追加两行纯文本用量状态；Kimi Code 用官方 `status_line` 接口
 - **实时侧边栏** — `tt sidebar` 窄窗格常驻面板：全部活跃会话一屏总览（状态灯 + 最近提示词 + 「下一步」建议），点击会话直达对应 iTerm2 / tmux 窗格
 - **当前会话自动分屏** — Codex 中显式执行 `$tt-sidebar`，在原会话右侧自动打开 1/3 宽度的独立提示词侧边栏
@@ -26,7 +26,7 @@
 
 ## StatusLine 状态栏
 
-`tt setup` 自动为 Claude Code、Codex 和 Kimi Code 配置状态栏，脚本更新时自动升级。
+`tt setup` 配置 Claude Code、Codex 和 Kimi Code 状态栏，脚本更新时自动升级。交互向导也可启用 Antigravity CLI 状态栏。
 
 ### Claude Code（官方接口）
 
@@ -83,6 +83,18 @@ Hook 状态**不进模型上下文**（实测），不跟随主题着色。`tt u
 - macOS / Linux / Windows 全平台支持（Windows 控制台 GBK 编码、后台刷新进程 detach 方式均已适配）
 - 已有自定义 `status_line.command` 时默认不覆盖（向导里选 No 也完全不碰）；`tt unsetup` 精确还原
 
+### Antigravity CLI（官方接口）
+
+报表和侧边栏直接读取本地会话，运行 `tt daily --agy` 或 `tt sidebar --agy` 即可。AGY 会话在 Sidebar 中可查看提示词和最近活动，终端窗格跳转与会话自动分屏目前由其他 Agent 的集成提供。实时状态栏可在 `tt setup` 向导中启用，也可以只配置 AGY：
+
+```bash
+tt setup --agy
+```
+
+安装后重开 AGY。`tt setup --agy` 只配置 AGY，保留其他设置和已有自定义状态栏命令。`tt unsetup --agy` 恢复安装前的 AGY 状态栏设置。
+
+状态栏显示会话输入／输出 token，上下文和两组 5 小时／周已用额度的进度条采用与 Claude Code 状态栏一致的配色和档位，并随 TT 主题切换。它只缓存额度字段，`tt status --agy` 最多使用 15 分钟内的快照，窗口到期后等待 AGY 提供新数据。可在 AGY 内执行 `/usage` 刷新并对照。报表成本沿用 Token Tracker 的模型估价，AGY 实际账单和 AI Credits 余额由 Google 提供。参见 [Google 官方 statusline 文档](https://antigravity.google/docs/cli/statusline/)。
+
 ## 报表速览
 
 `tt status` — 今日实时面板（今日合并概览 + 5h/7d 额度 + 今日会话）
@@ -105,7 +117,7 @@ Hook 状态**不进模型上下文**（实测），不跟随主题着色。`tt u
 
 在终端分屏 / tmux 窄窗格里常驻，一屏总览本机所有 AI 会话：
 
-- **活跃会话列表** — 过去 5h 内有动静的会话（Claude Code + Codex + Kimi Code），按最近活动排序取前 10；头行显示状态灯、`项目名(分支)`、agent、模型与距上次活动时间
+- **活跃会话列表** — 过去 5h 内有动静的会话（Claude Code + Codex + Kimi Code + AGY），按最近活动排序取前 10；头行显示状态灯、`项目名(分支)`、Agent、模型与距上次活动时间
 - **三地时钟** — 北京、洛杉矶、伦敦合并为一行，只显示城市与 `HH:MM`
 - **提示词历史** — 运行中、待确认、等输入会话保留最近 5 条，历史最多 1 行、最新最多 2 行；空闲会话只显示最新 1 条，不显示「下一步」
 - **状态灯** — 运行中（星形动画）/ 需要关注（工具调用无结果，大概率在等授权）/ 等输入 / 空闲
@@ -176,7 +188,7 @@ tt unsetup        # 卸载并恢复安装前的配置
 tt --version      # 查看版本（-v / -V 同义）
 ```
 
-> 多 agent 环境下想只看某一个 agent 的报表，加 `--claude` / `--codex` / `--kimi` 即可（互斥），对 `status` / `daily` / `weekly` / `monthly` / `sessions` 均生效。例如 `tt daily --kimi` 只显示 Kimi Code 的热力图。会话内的 `daily` / `weekly` 默认已自动跟随当前会话的 agent，显式 flag 会覆盖该行为。
+> 多 Agent 环境下可加 `--claude`、`--codex`、`--kimi` 或 `--agy`（互斥），筛选 `status`、`daily`、`weekly`、`monthly`、`sessions` 和 `sidebar`。例如 `tt daily --agy` 只显示 Antigravity CLI 用量。显式参数优先于 `daily` 和 `weekly` 的会话自动识别。
 
 > 💡 `tt daily` 是 GitHub 风格的 token 贡献热力图（深浅绿方格）。在 Claude Code 会话里输入 `!tt daily` 即可看到彩色热力图 —— 用户主动用 `!` 执行的命令，Claude Code 会渲染其 24-bit 真彩色输出。
 
@@ -235,6 +247,7 @@ tt sessions --sort tokens --asc # 按 token 升序
 | Claude Code | `~/.claude/projects/*/` | JSONL（逐消息用量） |
 | Codex | `~/.codex/sessions/` | JSONL + SQLite |
 | Kimi Code | `~/.kimi-code/sessions/` | wire JSONL（每 turn 增量） |
+| Antigravity CLI | `~/.gemini/antigravity-cli/` | transcript JSONL（逐请求用量）和 SQLite（项目路径） |
 
 路径跨平台：Windows 下 `~` 解析到 `%USERPROFILE%`。设了 `CLAUDE_CONFIG_DIR` / `CODEX_HOME` / `KIMI_CODE_HOME` 环境变量（官方支持的自定义目录）时自动跟随。
 
