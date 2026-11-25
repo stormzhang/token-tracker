@@ -8,7 +8,7 @@ _STRINGS = {
         "no_data": "暂无使用记录，开始使用 Claude Code 或 Codex 后数据会自动出现在这里。",
         "detected": "检测到: {agents}",
         "unknown_cmd": "未知命令: {cmd}",
-        "agent_filter_conflict": "--claude / --codex / --kimi 互斥，只能指定其中一个",
+        "agent_filter_conflict": "--claude / --codex / --kimi / --agy 互斥，只能指定其中一个",
         "agent_not_detected": "未检测到 {flag} 的使用数据，请先在该 agent 中使用后再查询",
         "sessions_limit_invalid": "会话条数必须是正整数，收到: {value}",
         "available_cmds": "可用命令: status, daily, weekly, monthly, sessions, sidebar, theme, setup, unsetup, --version",
@@ -74,6 +74,7 @@ _STRINGS = {
         "wizard_signoff": "祝你使用愉快",
         # --- hooks.py ---
         "no_agent_install": "未检测到 Claude Code、Codex 或 Kimi Code，请先安装其中之一",
+        "agy_manual_setup": "AGY 报表可直接使用 tt daily --agy。实时状态栏请在 AGY 中配置 tt agy-statusline。",
         "auto_setup_hint": "非交互环境，已按推荐默认（语言跟随系统 / 主题 mocha / 不替换已有自定义 statusLine）配置\n如需自定义请在终端运行 tt setup",
         "first_setup": "首次使用，正在配置状态栏...",
         "cc_not_found": "未检测到 Claude Code，跳过",
@@ -124,7 +125,7 @@ _STRINGS = {
         "no_data": "No usage records yet. Start using Claude Code or Codex and your data will show up here.",
         "detected": "Detected: {agents}",
         "unknown_cmd": "Unknown command: {cmd}",
-        "agent_filter_conflict": "--claude, --codex and --kimi are mutually exclusive; please pick one",
+        "agent_filter_conflict": "--claude, --codex, --kimi and --agy are mutually exclusive; please pick one",
         "agent_not_detected": "No usage data for {flag}; use it in that agent first, then query again",
         "sessions_limit_invalid": "Session count must be a positive integer, got: {value}",
         "available_cmds": "Available commands: status, daily, weekly, monthly, sessions, sidebar, theme, setup, unsetup, --version",
@@ -190,6 +191,7 @@ _STRINGS = {
         "wizard_signoff": "Enjoy!",
         # --- hooks.py ---
         "no_agent_install": "Claude Code, Codex or Kimi Code not detected, please install one first",
+        "agy_manual_setup": "AGY reports are ready via tt daily --agy. Configure tt agy-statusline in AGY for live quotas.",
         "auto_setup_hint": "Non-interactive env — configured with recommended defaults (language follows system / theme mocha / existing custom statusLine kept)\nRun tt setup in a terminal to customize",
         "first_setup": "First run, configuring status bar...",
         "cc_not_found": "Claude Code not detected, skipping",
