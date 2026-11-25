@@ -18,7 +18,7 @@ from .analyzer.aggregator import (
     aggregate_weekly,
 )
 from .analyzer.cost import calculate_cost
-from .hooks import is_setup, needs_update, setup, unsetup, update_hook
+from .hooks import configure_agy_statusline, is_setup, needs_update, setup, unsetup, update_hook
 from .i18n import t
 from .sidebar import registry_update_hint, scan_sessions
 from .tz import system_tz
@@ -347,12 +347,11 @@ def _run_setup_flow() -> None:
     if not agents:
         get_console().print(f"[red]{t('no_agent_install')}[/red]")
         return
-    if {agent.id for agent in agents} == {"agy"}:
-        get_console().print(t("agy_manual_setup"))
-        return
     if _should_run_wizard():
         from .wizard import run_wizard
         run_wizard()  # wizard 欢迎行下会显示检测到的 agent
+    elif {agent.id for agent in agents} == {"agy"}:
+        get_console().print(t("agy_setup_hint"))
     else:
         _auto_setup()
 
@@ -481,7 +480,7 @@ def _apply_theme_override(name: str | None) -> None:
     theme.set_active_theme(name)
 
 
-def _handle_non_data_command(command: str, args: list[str]) -> bool:
+def _handle_non_data_command(command: str, args: list[str], agent_id: str | None) -> bool:
     """处理不需要 Agent 数据的命令；已处理返回 True。"""
     if command in ("--version", "-v", "-V"):
         print(f"token-tracker {_get_version()}")
@@ -489,6 +488,9 @@ def _handle_non_data_command(command: str, args: list[str]) -> bool:
         return True
     if command == "theme":
         cmd_theme(args)
+        return True
+    if agent_id == "agy" and command in {"setup", "unsetup"}:
+        configure_agy_statusline(command == "setup")
         return True
     if command == "setup":
         _run_setup_flow()
@@ -603,7 +605,7 @@ def main():
     _apply_theme_override(theme_override)
     command = args[0] if args else "daily"
 
-    if _handle_non_data_command(command, args[1:]):
+    if _handle_non_data_command(command, args[1:], filter_agent):
         return
 
     agents = _select_agents(filter_agent)

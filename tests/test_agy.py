@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from rich.text import Text
 
-from token_tracker import cli, sidebar
+from token_tracker import cli, config, hooks, sidebar
 from token_tracker.adapters import agy, agy_quota
 from token_tracker.templates import agy_statusline
 
@@ -53,11 +53,56 @@ def test_agy_history_and_sidebar(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(sys, "argv", ["tt", "sidebar", "--agy", "--once"])
     cli.main()
     assert "sample repo" in capsys.readouterr().out
-    monkeypatch.setattr(cli, "detect_agents", lambda: [agy.detect()])
-    monkeypatch.setattr(cli, "_auto_setup", lambda: pytest.fail("AGY-only setup must leave client settings untouched"))
-    monkeypatch.setattr(sys, "argv", ["tt", "setup"])
+
+
+def test_agy_scoped_setup_preserves_and_restores_settings(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(agy, "AGY_HOME", tmp_path)
+    monkeypatch.setattr(config, "CONFIG_DIR", str(tmp_path / "tt"))
+    monkeypatch.setattr(cli, "_run_setup_flow", lambda: pytest.fail("Scoped setup touched other agents"))
+    monkeypatch.setattr(cli, "unsetup", lambda: pytest.fail("Scoped unsetup touched other agents"))
+    path = tmp_path / "settings.json"
+    before = {"statusLine": {"type": "", "command": "", "enabled": False}, "theme": "light"}
+    path.write_text(json.dumps(before), encoding="utf-8")
+
+    monkeypatch.setattr(sys, "argv", ["tt", "setup", "--agy"])
     cli.main()
-    assert "tt agy-statusline" in capsys.readouterr().out
+    configured = json.loads(path.read_text(encoding="utf-8"))
+    assert configured["theme"] == "light" and hooks.agy_statusline_active()
+    assert configured["statusLine"]["enabled"] is True
+    assert configured["statusLine"]["stack_with_default"] is True
+    assert configured["statusLine"]["command"].endswith(" -B -m token_tracker.templates.agy_statusline")
+    cli.main()
+    assert json.loads(path.read_text(encoding="utf-8")) == configured
+    capsys.readouterr()
+
+    configured["theme"] = "dark"
+    path.write_text(json.dumps(configured), encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", ["tt", "unsetup", "--agy"])
+    cli.main()
+    assert json.loads(path.read_text(encoding="utf-8")) == {**before, "theme": "dark"}
+    assert not hooks.agy_statusline_active()
+
+    custom = '{"statusLine":{"type":"command","command":"/custom/statusline"}}'
+    for original in (custom, "malformed json"):
+        path.write_text(original, encoding="utf-8")
+        assert not hooks.configure_agy_statusline(True, quiet=True)
+        assert not hooks.configure_agy_statusline(False, quiet=True)
+        assert path.read_text(encoding="utf-8") == original
+
+
+def test_agy_setup_wizard_offers_statusline(tmp_path, monkeypatch):
+    from token_tracker import wizard
+
+    monkeypatch.setattr(agy, "AGY_HOME", tmp_path)
+    monkeypatch.setattr(config, "CONFIG_DIR", str(tmp_path / "tt"))
+    monkeypatch.setattr(wizard, "_has_cc", lambda: False)
+    monkeypatch.setattr(wizard, "_has_codex", lambda: False)
+    monkeypatch.setattr(wizard, "_has_kimi", lambda: False)
+    asked = []
+    monkeypatch.setattr(wizard, "_ask_yes_no", lambda label, default: asked.append((label, default)) or True)
+    result = wizard.ask_components(step_prefix_fn=lambda i: f"[{i}] ")
+    assert result.agy_statusline is True
+    assert len(asked) == 1 and asked[0][0].startswith("[1] ") and asked[0][1] is False
 
 
 def test_agy_statusline_and_quota_snapshot(tmp_path, monkeypatch, capsys):

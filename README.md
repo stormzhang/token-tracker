@@ -26,7 +26,7 @@
 
 ## StatusLine 状态栏
 
-`tt setup` 自动为 Claude Code、Codex 和 Kimi Code 配置状态栏，脚本更新时自动升级。
+`tt setup` 配置 Claude Code、Codex 和 Kimi Code 状态栏，脚本更新时自动升级。交互向导也可启用 Antigravity CLI 状态栏。
 
 ### Claude Code（官方接口）
 
@@ -85,13 +85,13 @@ Hook 状态**不进模型上下文**（实测），不跟随主题着色。`tt u
 
 ### Antigravity CLI（官方接口）
 
-报表和侧边栏直接读取本地会话，运行 `tt daily --agy` 或 `tt sidebar --agy` 即可。启用实时状态栏可先试运行一轮：
+报表和侧边栏直接读取本地会话，运行 `tt daily --agy` 或 `tt sidebar --agy` 即可。AGY 会话在 Sidebar 中可查看提示词和最近活动，终端窗格跳转与会话自动分屏目前由其他 Agent 的集成提供。实时状态栏可在 `tt setup` 向导中启用，也可以只配置 AGY：
 
 ```bash
-agy --settings '{"statusLine":{"type":"command","command":"tt agy-statusline","stack_with_default":true}}'
+tt setup --agy
 ```
 
-需要长期启用时，将同一个 `statusLine` 对象加入 `~/.gemini/antigravity-cli/settings.json`，保留其他设置。已有自定义命令时请先检查原配置。AGY 的设置由你管理，`tt setup` 和 `tt unsetup` 均只管理原有集成。
+安装后重开 AGY。`tt setup --agy` 只配置 AGY，保留其他设置和已有自定义状态栏命令。`tt unsetup --agy` 恢复安装前的 AGY 状态栏设置。
 
 状态栏显示会话输入／输出 token、上下文使用率，以及 Gemini 和 Claude／GPT 两组可用的 5 小时与周额度。它只缓存额度字段，`tt status --agy` 最多使用 15 分钟内的快照，窗口到期后等待 AGY 提供新数据。可在 AGY 内执行 `/usage` 刷新并对照。报表成本沿用 Token Tracker 的模型估价，AGY 实际账单和 AI Credits 余额由 Google 提供。参见 [Google 官方 statusline 文档](https://antigravity.google/docs/cli/statusline/)。
 

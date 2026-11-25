@@ -10,6 +10,7 @@ import tomllib
 import pytest
 
 from token_tracker import config, hooks, i18n, sidebar_install
+from token_tracker.adapters import agy
 
 
 @pytest.fixture(autouse=True)
@@ -23,6 +24,7 @@ def _isolate_real_home(tmp_path, monkeypatch):
     """
     tt = tmp_path / "_tt"
     home = tmp_path / "_home"
+    monkeypatch.setattr(agy, "AGY_HOME", home / ".gemini" / "antigravity-cli")
     monkeypatch.setattr(hooks, "_TT", str(tt))
     monkeypatch.setattr(hooks, "_CLAUDE", str(home / ".claude"))
     monkeypatch.setattr(hooks, "_CODEX", str(home / ".codex"))

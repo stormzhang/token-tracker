@@ -2,13 +2,16 @@ import ctypes
 import json
 import os
 import re
+import shlex
 import stat
 import sys
 import tomllib
 from dataclasses import dataclass
 from importlib import resources
+from pathlib import Path
 
 from . import config, sidebar_install
+from .adapters import agy
 from .adapters.util import claude_home, codex_home, kimi_home
 from .analyzer import cost as _cost_mod
 from .i18n import t
@@ -27,6 +30,7 @@ class SetupComponents:
     cc_statusline: bool = True
     codex_faux_statusline: bool = True
     kimi_statusline: bool = True
+    agy_statusline: bool | None = None
 
     @classmethod
     def all_on(cls) -> "SetupComponents":
@@ -528,6 +532,97 @@ def update_hook() -> None:
 
 # --- setup ---
 
+_AGY_STATUSLINE_MODULE = " -B -m token_tracker.templates.agy_statusline"
+
+
+def _read_agy_settings(path: Path) -> dict:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}
+    if not isinstance(data, dict):
+        raise ValueError("AGY settings must be a JSON object")
+    return data
+
+
+def _agy_statusline_owned(status: object) -> bool:
+    if not isinstance(status, dict) or status.get("type") != "command":
+        return False
+    command = status.get("command")
+    return isinstance(command, str) and command.endswith(_AGY_STATUSLINE_MODULE)
+
+
+def _agy_settings_paths() -> tuple[Path, Path]:
+    return (agy.AGY_HOME / "settings.json").resolve(), Path(config.CONFIG_DIR) / "agy-statusline-backup.json"
+
+
+def _agy_statusline_backup(backup: Path, settings: Path) -> dict | None:
+    snapshot = _read_agy_settings(backup)
+    previous = snapshot.get("previous")
+    if (snapshot.get("settings_path") == str(settings) and isinstance(previous, dict)
+            and previous.keys() <= {"statusLine"}):
+        return previous
+    return None
+
+
+def agy_statusline_active() -> bool:
+    try:
+        settings, backup = _agy_settings_paths()
+        status = _read_agy_settings(settings).get("statusLine")
+        return bool(
+            isinstance(status, dict)
+            and _agy_statusline_owned(status)
+            and status.get("enabled", True)
+            and _agy_statusline_backup(backup, settings) is not None
+        )
+    except (OSError, ValueError):
+        return False
+
+
+def configure_agy_statusline(enable: bool, quiet: bool = False) -> bool:
+    if agy.detect() is None:
+        if not quiet:
+            get_console().print(t("agy_not_found"))
+        return False
+
+    try:
+        path, backup = _agy_settings_paths()
+        settings = _read_agy_settings(path)
+        status = settings.get("statusLine", {})
+        previous = _agy_statusline_backup(backup, path) if _agy_statusline_owned(status) else None
+
+        if enable:
+            if not isinstance(status, dict) or (status.get("command") not in (None, "") and previous is None):
+                if not quiet:
+                    get_console().print(t("agy_statusline_preserved"))
+                return False
+            python = f'"{sys.executable}"' if os.name == "nt" else shlex.quote(sys.executable)
+            installed = {
+                **status, "type": "command", "command": python + _AGY_STATUSLINE_MODULE,
+                "enabled": True, "stack_with_default": True,
+            }
+            if previous is None:
+                previous = {"statusLine": status} if "statusLine" in settings else {}
+                sidebar_install._write_json_atomic(str(backup), {"settings_path": str(path), "previous": previous})
+            if installed != status:
+                settings["statusLine"] = installed
+                sidebar_install._write_json_atomic(str(path), settings)
+        elif previous is not None:
+            settings.pop("statusLine")
+            settings.update(previous)
+            sidebar_install._write_json_atomic(str(path), settings)
+        else:
+            return False
+    except (OSError, ValueError):
+        if not quiet:
+            get_console().print(t("agy_settings_error"))
+        return False
+
+    if not quiet:
+        get_console().print(t("agy_statusline_installed" if enable else "agy_statusline_removed"))
+    return True
+
+
 def setup(auto: bool = False, components: SetupComponents | None = None, quiet: bool = False) -> None:
     """安装状态栏 + 可选组件。components=None 表示推荐默认（recommended_components：
     已有意图优先、CC 端探测 settings.json、绝不静默替换用户自定义 statusLine）。
@@ -540,8 +635,13 @@ def setup(auto: bool = False, components: SetupComponents | None = None, quiet: 
     has_codex = os.path.isdir(CODEX_DIR)
     has_kimi = os.path.isdir(_KIMI)
 
-    if not has_cc and not has_codex and not has_kimi:
+    has_agy = agy.detect() is not None
+    if not has_cc and not has_codex and not has_kimi and not has_agy:
         p(f"[red]{t('no_agent_install')}[/red]")
+        return
+    if has_agy and components.agy_statusline is not None:
+        configure_agy_statusline(components.agy_statusline, quiet)
+    if not has_cc and not has_codex and not has_kimi:
         return
 
     if auto:
@@ -795,6 +895,7 @@ def unsetup() -> None:
     has_cc = os.path.isdir(os.path.dirname(CLAUDE_SETTINGS))
     has_codex = os.path.isdir(CODEX_DIR)
     has_kimi = os.path.isdir(_KIMI)
+    has_agy = agy.detect() is not None
 
     if has_cc:
         _unsetup_claude()
@@ -804,7 +905,9 @@ def unsetup() -> None:
     if has_kimi:
         _unsetup_kimi_statusline()
         _unsetup_kimi_sidebar()
-    if not has_cc and not has_codex and not has_kimi:
+    if has_agy:
+        configure_agy_statusline(False)
+    if not has_cc and not has_codex and not has_kimi and not has_agy:
         get_console().print(f"[dim]{t('no_agent_detected')}[/dim]")
 
 

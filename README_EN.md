@@ -25,7 +25,7 @@ Custom StatusLine integration + CLI Dashboard — see token usage, cost, and rat
 
 ## StatusLine
 
-`tt setup` auto-configures status lines for Claude Code, Codex, and Kimi Code, auto-upgraded when the script updates.
+`tt setup` configures status lines for Claude Code, Codex, and Kimi Code and updates their scripts automatically. The interactive wizard also offers the Antigravity CLI status line.
 
 ### Claude Code (official API)
 
@@ -84,13 +84,13 @@ Built on Kimi Code's official `status_line` API (`tui.toml`) — a single trueco
 
 ### Antigravity CLI (official API)
 
-Reports and the sidebar read local sessions directly. Try `tt daily --agy` or `tt sidebar --agy`. To enable the live status line for one session, run:
+Reports and the sidebar read local sessions directly. Try `tt daily --agy` or `tt sidebar --agy`. The sidebar shows AGY prompts and recent activity. Pane jumping and automatic session splitting are available through other agent integrations. Enable the live status line in the `tt setup` wizard, or configure AGY on its own:
 
 ```bash
-agy --settings '{"statusLine":{"type":"command","command":"tt agy-statusline","stack_with_default":true}}'
+tt setup --agy
 ```
 
-For persistent use, add the same `statusLine` object to `~/.gemini/antigravity-cli/settings.json`, preserving other settings. Review any existing custom command first. Both `tt setup` and `tt unsetup` leave this manual AGY configuration in your hands.
+Reopen AGY to apply the change. `tt setup --agy` configures only AGY and preserves unrelated settings and existing custom statusline commands. `tt unsetup --agy` restores the previous AGY statusline settings.
 
 The status line shows session input and output tokens, context utilization, and the available five-hour and weekly quota buckets for Gemini and Claude/GPT. It caches only quota fields. `tt status --agy` shows snapshots up to 15 minutes old and hides buckets whose reset has passed until AGY supplies fresh data. Run `/usage` in AGY to refresh and cross-check. Report costs use Token Tracker's model-price estimates. Google reports actual AGY charges and AI credit balances. See [Google's status line documentation](https://antigravity.google/docs/cli/statusline/).
 
