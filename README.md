@@ -93,7 +93,7 @@ tt setup --agy
 
 安装后重开 AGY。`tt setup --agy` 只配置 AGY，保留其他设置和已有自定义状态栏命令。`tt unsetup --agy` 恢复安装前的 AGY 状态栏设置。
 
-状态栏显示会话输入／输出 token，并用跟随 TT 主题的彩色进度条显示上下文使用率，以及 Gemini 和 Claude／GPT 两组可用的 5 小时与周已用额度。它只缓存额度字段，`tt status --agy` 最多使用 15 分钟内的快照，窗口到期后等待 AGY 提供新数据。可在 AGY 内执行 `/usage` 刷新并对照。报表成本沿用 Token Tracker 的模型估价，AGY 实际账单和 AI Credits 余额由 Google 提供。参见 [Google 官方 statusline 文档](https://antigravity.google/docs/cli/statusline/)。
+状态栏显示会话输入／输出 token，上下文和两组 5 小时／周已用额度的进度条采用与 Claude Code 状态栏一致的配色和档位，并随 TT 主题切换。它只缓存额度字段，`tt status --agy` 最多使用 15 分钟内的快照，窗口到期后等待 AGY 提供新数据。可在 AGY 内执行 `/usage` 刷新并对照。报表成本沿用 Token Tracker 的模型估价，AGY 实际账单和 AI Credits 余额由 Google 提供。参见 [Google 官方 statusline 文档](https://antigravity.google/docs/cli/statusline/)。
 
 ## 报表速览
 

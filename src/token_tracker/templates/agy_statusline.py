@@ -16,9 +16,12 @@ from ..ui.themes import theme_to_statusline_ansi
 def _progress(pct: float, width: int, colors: dict[str, str]) -> str:
     filled = round(pct / 100 * width)
     level = "bar_ok" if pct < 50 else "bar_warn" if pct < 80 else "bar_danger"
-    color, reset = colors.get(level, ""), colors.get("reset", "")
-    fill = f"{color}{'█' * filled}{reset}" if filled else ""
-    return f"{fill}{'░' * (width - filled)} {color}{pct:.1f}%{reset}"
+    color, label, reset = colors.get(level, ""), colors.get("label", ""), colors.get("reset", "")
+    empty = "░" * (width - filled)
+    # Match Claude's shaded track. At zero usage the track uses the terminal foreground.
+    if pct > 0 and empty:
+        empty = f"{color}{empty}{reset}"
+    return f"{color}{'█' * filled}{reset}{empty} {label}{pct:.0f}%{reset}"
 
 
 def _status_rows(parts: list[str], prefix: str, columns: int) -> list[str]:
@@ -36,11 +39,12 @@ def _status_rows(parts: list[str], prefix: str, columns: int) -> list[str]:
     return rows
 
 
-def render(data: dict, now: datetime, theme: str | None = None) -> str:
-    colors = theme_to_statusline_ansi(theme) if theme else {}
+def render(data: dict, now: datetime, colors: dict[str, str] | None = None) -> str:
+    colors = colors or {}
+    label_color, reset_color = colors.get("label", ""), colors.get("reset", "")
     width = data.get("terminal_width")
     columns = max(1, width - 4) if type(width) is int and width > 0 else 100
-    bar_width = 8 if columns >= 96 else 5
+    bar_width = 8 if columns >= 100 else 6 if columns >= 60 else 4
     cwd = data.get("cwd")
     model = data.get("model")
     context = data.get("context_window")
@@ -57,7 +61,7 @@ def render(data: dict, now: datetime, theme: str | None = None) -> str:
             parts.append(f"In: {counts[0]:,} · Out: {counts[1]:,}")
         used = context.get("used_percentage")
         if type(used) in (int, float) and 0 <= used <= 100:
-            parts.append(f"Ctx: {_progress(used, bar_width, colors)}")
+            parts.append(f"{label_color}Ctx:{reset_color} {_progress(used, bar_width, colors)}")
     lines = _status_rows(parts, "", columns)
     for label, limits in agy_quota.quota_groups(agy_quota.known_buckets(data.get("quota")), now).items():
         windows = []
@@ -67,10 +71,12 @@ def render(data: dict, now: datetime, theme: str | None = None) -> str:
         ):
             if pct is None:
                 continue
-            limit = f"{period} {_progress(pct, bar_width, colors)}"
+            limit = f"{label_color}{period}{reset_color} {_progress(pct, bar_width, colors)}"
             if resets is not None:
                 hours, minutes = divmod(max(0, resets - int(now.timestamp())) // 60, 60)
-                limit += f" (reset {hours}h{minutes:02d}m)" if hours else f" (reset {minutes}m)"
+                timer = f"{hours}h{minutes:02d}m" if hours else f"{minutes}m"
+                dim = "\x1b[2m" if colors else ""
+                limit += f" {dim}{label_color}(reset {timer}){reset_color}"
             windows.append(limit)
         lines.extend(_status_rows(windows, f"{label} used: ", columns))
     return "\n".join(lines)
@@ -86,8 +92,11 @@ def main() -> None:
     if sys.platform == "win32":
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     agy_quota.save_snapshot(agy_quota.known_buckets(data.get("quota")))
-    theme = None if os.environ.get("NO_COLOR") or os.environ.get("TERM") == "dumb" else config.resolve_theme()
-    print(render(data, datetime.now(UTC), theme))
+    colors = None
+    if not os.environ.get("NO_COLOR") and os.environ.get("TERM") != "dumb":
+        depth = "truecolor" if os.environ.get("COLORTERM") in ("truecolor", "24bit") else "256"
+        colors = theme_to_statusline_ansi(config.resolve_theme(), depth)
+    print(render(data, datetime.now(UTC), colors))
 
 
 if __name__ == "__main__":
