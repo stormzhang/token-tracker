@@ -12,6 +12,7 @@ from rich.text import Text
 from token_tracker import cli, config, hooks, sidebar
 from token_tracker.adapters import agy, agy_quota
 from token_tracker.templates import agy_statusline
+from token_tracker.ui.themes import theme_to_statusline_ansi
 
 
 def test_agy_history_and_sidebar(tmp_path, monkeypatch, capsys):
@@ -108,6 +109,7 @@ def test_agy_setup_wizard_offers_statusline(tmp_path, monkeypatch):
 def test_agy_statusline_and_quota_snapshot(tmp_path, monkeypatch, capsys):
     quota_file = tmp_path / "tt-agy-quota.json"
     monkeypatch.setattr(agy_quota, "QUOTA_FILE", quota_file)
+    monkeypatch.setenv("TT_THEME", "mocha")
     now = datetime.now(UTC)
     reset = (now + timedelta(hours=2)).isoformat()
     payload = {
@@ -124,11 +126,11 @@ def test_agy_statusline_and_quota_snapshot(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(sys, "argv", ["tt", "agy-statusline"])
     monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload)))
     cli.main()
-    output = capsys.readouterr().out
-    assert "In: 601 · Out: 50 | Ctx: 4.2%" in output
-    assert "Gemini used: 5h 25.0% (reset " in output
-    assert "7d 50.0%" in output
-    assert output.splitlines()[-1] == "Claude / GPT used: 5h 0.0%"
+    output = Text.from_ansi(capsys.readouterr().out).plain
+    assert "In: 601 · Out: 50 | Ctx: ░░░░░░░░ 4.2%" in output
+    assert "Gemini used: 5h ██░░░░░░ 25.0% (reset " in output
+    assert "7d ████░░░░ 50.0%" in output
+    assert output.splitlines()[-1] == "Claude / GPT used: 5h ░░░░░░░░ 0.0%"
     saved = json.loads(quota_file.read_text())
     assert set(saved) == {"gemini-5h", "gemini-weekly", "3p-5h", "3p-weekly"}
     assert "email@example.com" not in quota_file.read_text()
@@ -142,3 +144,31 @@ def test_agy_statusline_and_quota_snapshot(tmp_path, monkeypatch, capsys):
     os.utime(quota_file, (expired, expired))
     assert agy_quota.load_rate_limits() == {}
     assert agy_statusline.render({"quota": {"gemini-5h": {"remaining_fraction": True}}}, now) == ""
+
+
+def test_agy_progress_colors_and_narrow_layout(monkeypatch, capsys, tmp_path):
+    now = datetime.now(UTC)
+    reset = (now + timedelta(hours=4)).isoformat()
+    payload = {
+        "terminal_width": 60,
+        "context_window": {"used_percentage": 10, "total_input_tokens": 1234, "total_output_tokens": 234},
+        "quota": {
+            "gemini-5h": {"remaining_fraction": .4, "reset_time": reset},
+            "gemini-weekly": {"remaining_fraction": .1, "reset_time": reset},
+        },
+    }
+    output = agy_statusline.render(payload, now, "nord")
+    colors = theme_to_statusline_ansi("nord")
+    assert f"{colors['bar_ok']}10.0%" in output
+    assert f"{colors['bar_warn']}60.0%" in output
+    assert f"{colors['bar_danger']}90.0%" in output
+    lines = Text.from_ansi(output).plain.splitlines()
+    assert len(lines) == 3 and all(len(line) <= 56 for line in lines)
+    assert "5h ███░░ 60.0%" in lines[1] and "7d" in lines[2]
+
+    monkeypatch.setenv("NO_COLOR", "1")
+    monkeypatch.setattr(agy_quota, "QUOTA_FILE", tmp_path / "quota.json")
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload)))
+    agy_statusline.main()
+    plain = capsys.readouterr().out
+    assert "\x1b" not in plain and "5h ███░░ 60.0%" in plain

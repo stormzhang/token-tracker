@@ -92,7 +92,7 @@ tt setup --agy
 
 Reopen AGY to apply the change. `tt setup --agy` configures only AGY and preserves unrelated settings and existing custom statusline commands. `tt unsetup --agy` restores the previous AGY statusline settings.
 
-The status line shows session input and output tokens, context utilization, and the available five-hour and weekly quota buckets for Gemini and Claude/GPT. It caches only quota fields. `tt status --agy` shows snapshots up to 15 minutes old and hides buckets whose reset has passed until AGY supplies fresh data. Run `/usage` in AGY to refresh and cross-check. Report costs use Token Tracker's model-price estimates. Google reports actual AGY charges and AI credit balances. See [Google's status line documentation](https://antigravity.google/docs/cli/statusline/).
+The status line shows session input and output tokens, with progress bars that follow the TT theme for context utilization and the available five-hour and weekly usage buckets for Gemini and Claude/GPT. It caches only quota fields. `tt status --agy` shows snapshots up to 15 minutes old and hides buckets whose reset has passed until AGY supplies fresh data. Run `/usage` in AGY to refresh and cross-check. Report costs use Token Tracker's model-price estimates. Google reports actual AGY charges and AI credit balances. See [Google's status line documentation](https://antigravity.google/docs/cli/statusline/).
 
 ## Live Sidebar
 
